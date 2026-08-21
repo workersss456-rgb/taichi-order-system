@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>叫料系統</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<div class="toast-stack" id="toast-stack"></div>
+
+<header class="topbar">
+  <div class="topbar-inner">
+    <div class="brand"><span class="brand-mark">叫</span> 叫料系統</div>
+
+    <nav class="nav-tabs">
+      <button class="nav-tab active" data-view="shop">商城</button>
+      <button class="nav-tab" data-view="history">歷史紀錄</button>
+      <button class="nav-tab" data-view="special">特殊設備採購</button>
+    </nav>
+
+    <div class="identity-fields">
+      <input type="text" id="id-name" placeholder="姓名">
+      <input type="text" id="id-dept" placeholder="部門">
+    </div>
+
+    <button class="cart-btn" id="cart-btn">
+      🛒 購物車 <span class="cart-count" id="cart-count">0</span>
+    </button>
+
+    <a class="admin-link" href="admin.html">管理後台</a>
+  </div>
+</header>
+
+<main class="page">
+
+  <!-- ========== 商城 ========== -->
+  <section class="view active" id="view-shop">
+    <div class="shop-layout">
+      <nav class="cat-nav" id="cat-nav"></nav>
+      <div id="subcats-container">
+        <div class="empty-state"><div class="icon">⏳</div>載入商品目錄中…</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ========== 歷史紀錄 ========== -->
+  <section class="view" id="view-history">
+    <div class="section-title">
+      <div>
+        <span class="eyebrow">History</span>
+        <h2>叫料歷史紀錄</h2>
+      </div>
+    </div>
+    <div class="filter-bar">
+      <div class="field"><label>姓名</label><input type="text" id="hist-name" placeholder="搜尋姓名"></div>
+      <div class="field"><label>部門</label><input type="text" id="hist-dept" placeholder="搜尋部門"></div>
+      <div class="field"><label>起始日期</label><input type="date" id="hist-from"></div>
+      <div class="field"><label>結束日期</label><input type="date" id="hist-to"></div>
+      <button class="btn btn-primary" id="hist-search">搜尋</button>
+    </div>
+    <div id="history-list"></div>
+  </section>
+
+  <!-- ========== 特殊設備採購 ========== -->
+  <section class="view" id="view-special">
+    <div class="section-title">
+      <div>
+        <span class="eyebrow">Special Procurement</span>
+        <h2>特殊設備採購申請</h2>
+      </div>
+    </div>
+
+    <div class="card" style="margin-bottom: 28px; max-width: 560px;">
+      <p class="small-note" style="margin-top:-4px; margin-bottom:14px;">
+        目錄裡沒有的設備，可以在這裡提出申請，送出後將由管理員審核並通知。
+      </p>
+      <form id="special-form">
+        <div class="field"><label>姓名</label><input type="text" id="sp-name" required></div>
+        <div class="field"><label>部門</label><input type="text" id="sp-dept" required></div>
+        <div class="field"><label>設備品名</label><input type="text" id="sp-item" required></div>
+        <div class="field"><label>建議廠商（選填）</label><input type="text" id="sp-vendor"></div>
+        <div class="field"><label>用途說明</label><textarea id="sp-purpose"></textarea></div>
+        <div class="field"><label>預估預算（選填）</label><input type="text" id="sp-budget" placeholder="例如：NT$ 15,000"></div>
+        <div class="field"><label>數量</label><input type="number" id="sp-qty" value="1" min="1"></div>
+        <div class="field"><label>備註</label><textarea id="sp-note"></textarea></div>
+        <button type="submit" class="btn btn-accent btn-block">送出申請</button>
+      </form>
+    </div>
+
+    <div class="section-title">
+      <div><h3 style="font-size:15px;">我的申請紀錄</h3></div>
+    </div>
+    <div class="filter-bar">
+      <div class="field"><label>姓名</label><input type="text" id="sp-hist-name" placeholder="搜尋姓名"></div>
+      <div class="field"><label>部門</label><input type="text" id="sp-hist-dept" placeholder="搜尋部門"></div>
+      <button class="btn btn-primary" id="sp-hist-search">搜尋</button>
+    </div>
+    <div id="special-list"></div>
+  </section>
+
+</main>
+
+<div class="overlay" id="overlay"></div>
+
+<div class="cart-drawer" id="cart-drawer">
+  <div class="cart-drawer-header">
+    <h3>購物車</h3>
+    <button class="btn btn-secondary btn-sm" id="cart-close">關閉</button>
+  </div>
+  <div class="cart-drawer-body" id="cart-lines">
+    <div class="empty-state"><div class="icon">🛒</div>購物車是空的</div>
+  </div>
+  <div class="cart-drawer-footer">
+    <div class="field"><label>備註（選填）</label><textarea id="cart-note" placeholder="給管理員的備註…"></textarea></div>
+    <button class="btn btn-primary btn-block" id="cart-submit">送出叫料單</button>
+  </div>
+</div>
+
+<div class="modal-backdrop" id="confirm-modal" style="display:none;">
+  <div class="modal">
+    <div class="ticket" style="border:none; padding:0;">
+      <div class="ticket-head">
+        <span class="ticket-no" id="confirm-no">單號 #—</span>
+        <span class="ticket-meta" id="confirm-date">—</span>
+      </div>
+      <h3>叫料單已送出</h3>
+      <p class="sub">已為您記錄這筆叫料，管理員可於後台查看。</p>
+      <div id="confirm-items"></div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-primary btn-block" id="confirm-close">完成</button>
+    </div>
+  </div>
+</div>
+
+<script src="js/api.js"></script>
+<script src="js/shop.js"></script>
+</body>
+</html>

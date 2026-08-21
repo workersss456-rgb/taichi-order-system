@@ -1,0 +1,14 @@
+{
+  "name": "order-system",
+  "version": "1.0.0",
+  "description": "内部叫料系统 - 分类商城式叫料 + 特殊设备采购申请",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "better-sqlite3": "^12.4.1",
+    "express": "^5.1.0",
+    "nodemailer": "^9.0.5"
+  }
+}
