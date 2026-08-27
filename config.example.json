@@ -1,5 +1,5 @@
 {
-  "adminPassword": "請改成你自己的管理員密碼",
+  "adminPassword": "45149105",
   "port": 3000,
   "smtp": {
     "enabled": false,
