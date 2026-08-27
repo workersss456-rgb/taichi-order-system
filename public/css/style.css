@@ -495,4 +495,23 @@ a { color: var(--primary); }
   .admin-sidebar .brand { display: none; }
   .admin-main { padding: 18px; }
   .identity-fields input { width: 78px; }
+@media (max-width: 860px) {
+  .shop-layout { grid-template-columns: 1fr; }
+  ...
+  .identity-fields input { width: 78px; }
+@media (max-width: 560px) {
+  .item-grid {
+    grid-template-columns: repeat(3, 1fr);
+    gap: 8px;
+  }
+  .item-body { padding: 8px 6px 10px; gap: 6px; }
+  .item-name { font-size: 11.5px; line-height: 1.3; }
+  .item-desc { display: none; }
+  .item-controls select { font-size: 11px; padding: 4px 5px; }
+  .qty-row { gap: 4px; }
+  .qty-stepper button { width: 20px; height: 20px; font-size: 12px; }
+  .qty-stepper input { width: 24px; font-size: 11px; }
+  .item-controls .add-to-cart { font-size: 10.5px; padding: 6px 2px; }
+  .item-controls .small-note { display: none; }
+  .subcat-title h3 { font-size: 15px; }
 }
