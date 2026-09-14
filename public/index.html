@@ -20,10 +20,7 @@
       <button class="nav-tab" data-view="special">特殊設備採購</button>
     </nav>
 
-    <div class="identity-fields">
-      <input type="text" id="id-name" placeholder="姓名">
-      <input type="text" id="id-dept" placeholder="部門">
-    </div>
+    <button class="profile-badge" id="profile-badge">👤 尚未登入</button>
 
     <button class="cart-btn" id="cart-btn">
       🛒 購物車 <span class="cart-count" id="cart-count">0</span>
@@ -55,7 +52,7 @@
     </div>
     <div class="filter-bar">
       <div class="field"><label>姓名</label><input type="text" id="hist-name" placeholder="搜尋姓名"></div>
-      <div class="field"><label>部門</label><input type="text" id="hist-dept" placeholder="搜尋部門"></div>
+      <div class="field"><label>職稱</label><input type="text" id="hist-title" placeholder="搜尋職稱"></div>
       <div class="field"><label>起始日期</label><input type="date" id="hist-from"></div>
       <div class="field"><label>結束日期</label><input type="date" id="hist-to"></div>
       <button class="btn btn-primary" id="hist-search">搜尋</button>
@@ -76,9 +73,8 @@
       <p class="small-note" style="margin-top:-4px; margin-bottom:14px;">
         目錄裡沒有的設備，可以在這裡提出申請，送出後將由管理員審核並通知。
       </p>
+      <p class="small-note" id="sp-identity-line" style="margin-bottom:14px;"></p>
       <form id="special-form">
-        <div class="field"><label>姓名</label><input type="text" id="sp-name" required></div>
-        <div class="field"><label>部門</label><input type="text" id="sp-dept" required></div>
         <div class="field"><label>設備品名</label><input type="text" id="sp-item" required></div>
         <div class="field"><label>建議廠商（選填）</label><input type="text" id="sp-vendor"></div>
         <div class="field"><label>用途說明</label><textarea id="sp-purpose"></textarea></div>
@@ -94,7 +90,7 @@
     </div>
     <div class="filter-bar">
       <div class="field"><label>姓名</label><input type="text" id="sp-hist-name" placeholder="搜尋姓名"></div>
-      <div class="field"><label>部門</label><input type="text" id="sp-hist-dept" placeholder="搜尋部門"></div>
+      <div class="field"><label>職稱</label><input type="text" id="sp-hist-title" placeholder="搜尋職稱"></div>
       <button class="btn btn-primary" id="sp-hist-search">搜尋</button>
     </div>
     <div id="special-list"></div>
@@ -131,6 +127,37 @@
     </div>
     <div class="modal-actions">
       <button class="btn btn-primary btn-block" id="confirm-close">完成</button>
+    </div>
+  </div>
+</div>
+
+<!-- ========== 註冊 / 登入 ========== -->
+<div class="modal-backdrop" id="profile-modal" style="display:none;">
+  <div class="modal">
+    <h3>註冊 / 登入</h3>
+    <p class="sub">不需要密碼，用聯絡手機辨識身份即可。</p>
+
+    <!-- 第一步：輸入手機號碼查詢（已註冊過就直接登入） -->
+    <div id="pf-step-lookup">
+      <div class="field"><label>聯絡手機</label><input type="tel" id="pf-phone-lookup" placeholder="請輸入您的聯絡手機"></div>
+      <button type="button" class="btn btn-primary btn-block" id="pf-lookup-btn">查詢 / 登入</button>
+      <p class="small-note">第一次使用？輸入手機號碼後按上面按鈕，系統會請您補填基本資料完成註冊。</p>
+    </div>
+
+    <!-- 第二步：查無資料時，補填基本資料完成註冊 -->
+    <div id="pf-step-register" style="display:none;">
+      <form id="profile-form">
+        <input type="hidden" id="pf-phone-register">
+        <div class="field"><label>姓名</label><input type="text" id="pf-name" required></div>
+        <div class="field"><label>職稱</label><input type="text" id="pf-title" required></div>
+        <div class="field"><label>Email（選填，用來收到通知信）</label><input type="email" id="pf-email"></div>
+        <button type="submit" class="btn btn-primary btn-block">完成註冊</button>
+      </form>
+      <button type="button" class="btn btn-secondary btn-block" id="pf-back-to-lookup" style="margin-top:8px;">← 返回，換一組手機號碼</button>
+    </div>
+
+    <div class="modal-actions">
+      <button class="btn btn-secondary btn-block" id="profile-modal-close">關閉</button>
     </div>
   </div>
 </div>
