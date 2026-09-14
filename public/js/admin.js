@@ -288,7 +288,7 @@ async function loadSpecialReview() {
           <span class="badge ${STATUS_CLASS[r.status]}">${STATUS_LABEL[r.status]}</span>
         </div>
         <div class="ticket-row"><span class="name">${escapeHtml(r.item_name)}</span><span class="sub">x${r.quantity}</span></div>
-        <div class="ticket-row sub">${escapeHtml(r.requester_name)} · ${escapeHtml(r.department)} · ${escapeHtml(r.created_at)}</div>
+        <div class="ticket-row sub">${escapeHtml(r.requester_name)} · ${escapeHtml(r.title)} · ${escapeHtml(r.phone || '-')} · ${escapeHtml(r.created_at)}</div>
         ${r.vendor ? `<div class="ticket-row sub">廠商：${escapeHtml(r.vendor)}</div>` : ''}
         ${r.budget ? `<div class="ticket-row sub">預算：${escapeHtml(r.budget)}</div>` : ''}
         ${r.purpose ? `<div class="ticket-row sub">用途：${escapeHtml(r.purpose)}</div>` : ''}
@@ -335,11 +335,11 @@ async function loadHistoryPanel() {
 
   const params = new URLSearchParams();
   const name = document.getElementById('ah-name').value.trim();
-  const dept = document.getElementById('ah-dept').value.trim();
+  const title = document.getElementById('ah-title').value.trim();
   const from = document.getElementById('ah-from').value;
   const to = document.getElementById('ah-to').value;
   if (name) params.set('name', name);
-  if (dept) params.set('department', dept);
+  if (title) params.set('title', title);
   if (from) params.set('from', from);
   if (to) params.set('to', to);
 
@@ -355,7 +355,7 @@ async function loadHistoryPanel() {
           <span class="ticket-no">單號 #${String(o.id).padStart(5, '0')}</span>
           <span class="ticket-meta">${escapeHtml(o.created_at)}</span>
         </div>
-        <div class="ticket-row"><span class="name">${escapeHtml(o.requester_name)}　<span class="sub">${escapeHtml(o.department)}</span></span></div>
+        <div class="ticket-row"><span class="name">${escapeHtml(o.requester_name)}　<span class="sub">${escapeHtml(o.title)}${o.phone ? ' · ' + escapeHtml(o.phone) : ''}</span></span></div>
         ${o.items.map((it) => `
           <div class="ticket-row">
             <span class="name">${escapeHtml(it.item_name)} ${[it.spec, it.color].filter(Boolean).map((s) => `· ${escapeHtml(s)}`).join(' ')}</span>

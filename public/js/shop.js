@@ -1,11 +1,12 @@
 let catalog = [];
 let cart = [];
+let profile = null; // { id, name, title, phone, email }
 
 // ---------- 初始化 ----------
 document.addEventListener('DOMContentLoaded', async () => {
-  restoreIdentity();
+  loadProfile();
   bindNav();
-  bindIdentityInputs();
+  bindProfileModal();
   bindCartDrawer();
   bindSpecialForm();
   bindHistorySearch();
@@ -20,25 +21,98 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 });
 
-function restoreIdentity() {
-  document.getElementById('id-name').value = localStorage.getItem('os_name') || '';
-  document.getElementById('id-dept').value = localStorage.getItem('os_dept') || '';
+// ============================================================
+// 身份：註冊 / 登入（不需密碼，用聯絡手機辨識）
+// ============================================================
+function loadProfile() {
+  const raw = localStorage.getItem('os_profile');
+  profile = raw ? JSON.parse(raw) : null;
+  renderProfileBadge();
 }
 
-function bindIdentityInputs() {
-  document.getElementById('id-name').addEventListener('input', (e) => {
-    localStorage.setItem('os_name', e.target.value);
+function saveProfile(user) {
+  profile = user;
+  localStorage.setItem('os_profile', JSON.stringify(user));
+  renderProfileBadge();
+}
+
+function renderProfileBadge() {
+  const badge = document.getElementById('profile-badge');
+  badge.textContent = profile ? `👤 ${profile.name}（${profile.title}）` : '👤 尚未登入 / 註冊';
+  const spLine = document.getElementById('sp-identity-line');
+  if (spLine) {
+    spLine.textContent = profile
+      ? `將以「${profile.name}（${profile.title}）」的身份送出申請，如需更換請點右上角身份按鈕。`
+      : '尚未登入，送出前請先點右上角完成註冊/登入。';
+  }
+}
+
+function openProfileModal() {
+  document.getElementById('profile-modal').style.display = 'flex';
+  document.getElementById('pf-step-lookup').style.display = 'block';
+  document.getElementById('pf-step-register').style.display = 'none';
+  document.getElementById('pf-phone-lookup').value = profile ? profile.phone : '';
+}
+function closeProfileModal() {
+  document.getElementById('profile-modal').style.display = 'none';
+}
+
+function bindProfileModal() {
+  document.getElementById('profile-badge').addEventListener('click', openProfileModal);
+  document.getElementById('profile-modal-close').addEventListener('click', closeProfileModal);
+
+  document.getElementById('pf-lookup-btn').addEventListener('click', async () => {
+    const phone = document.getElementById('pf-phone-lookup').value.trim();
+    if (!phone) return showToast('請輸入聯絡手機', 'error');
+    try {
+      const user = await Api.get(`/api/users/lookup?phone=${encodeURIComponent(phone)}`);
+      saveProfile(user);
+      closeProfileModal();
+      showToast(`歡迎回來，${user.name}`, 'success');
+    } catch (err) {
+      // 查無資料 -> 顯示註冊欄位，讓使用者補填姓名/職稱完成註冊
+      document.getElementById('pf-phone-register').value = phone;
+      document.getElementById('pf-name').value = '';
+      document.getElementById('pf-title').value = '';
+      document.getElementById('pf-email').value = '';
+      document.getElementById('pf-step-lookup').style.display = 'none';
+      document.getElementById('pf-step-register').style.display = 'block';
+    }
   });
-  document.getElementById('id-dept').addEventListener('input', (e) => {
-    localStorage.setItem('os_dept', e.target.value);
+
+  document.getElementById('pf-back-to-lookup').addEventListener('click', () => {
+    document.getElementById('pf-step-register').style.display = 'none';
+    document.getElementById('pf-step-lookup').style.display = 'block';
+  });
+
+  document.getElementById('profile-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const payload = {
+      name: document.getElementById('pf-name').value.trim(),
+      title: document.getElementById('pf-title').value.trim(),
+      phone: document.getElementById('pf-phone-register').value.trim(),
+      email: document.getElementById('pf-email').value.trim(),
+    };
+    if (!payload.name) return showToast('請填寫姓名', 'error');
+    if (!payload.title) return showToast('請填寫職稱', 'error');
+    if (!payload.phone) return showToast('請填寫聯絡手機', 'error');
+    try {
+      const user = await Api.post('/api/register', payload);
+      saveProfile(user);
+      closeProfileModal();
+      showToast('註冊完成，歡迎使用', 'success');
+    } catch (err) {
+      showToast(err.message, 'error');
+    }
   });
 }
 
-function getIdentity() {
-  return {
-    name: document.getElementById('id-name').value.trim(),
-    dept: document.getElementById('id-dept').value.trim(),
-  };
+// 需要先登入才能執行的動作（下單／送出特殊採購申請）呼叫這個檢查
+function requireProfile() {
+  if (profile) return true;
+  showToast('請先完成註冊/登入', 'error');
+  openProfileModal();
+  return false;
 }
 
 // ---------- 頁籤切換 ----------
@@ -262,9 +336,7 @@ function bindCartDrawer() {
 }
 
 async function submitOrder() {
-  const { name, dept } = getIdentity();
-  if (!name) return showToast('請先在上方填寫姓名', 'error');
-  if (!dept) return showToast('請先在上方填寫部門', 'error');
+  if (!requireProfile()) return;
   if (!cart.length) return showToast('購物車是空的', 'error');
 
   const note = document.getElementById('cart-note').value.trim();
@@ -274,8 +346,10 @@ async function submitOrder() {
 
   try {
     const order = await Api.post('/api/orders', {
-      requester_name: name,
-      department: dept,
+      requester_name: profile.name,
+      title: profile.title,
+      phone: profile.phone,
+      email: profile.email,
       note,
       items: cart,
     });
@@ -316,11 +390,11 @@ async function loadHistory() {
 
   const params = new URLSearchParams();
   const name = document.getElementById('hist-name').value.trim();
-  const dept = document.getElementById('hist-dept').value.trim();
+  const title = document.getElementById('hist-title').value.trim();
   const from = document.getElementById('hist-from').value;
   const to = document.getElementById('hist-to').value;
   if (name) params.set('name', name);
-  if (dept) params.set('department', dept);
+  if (title) params.set('title', title);
   if (from) params.set('from', from);
   if (to) params.set('to', to);
 
@@ -337,7 +411,7 @@ async function loadHistory() {
           <span class="ticket-meta">${escapeHtml(o.created_at)}</span>
         </div>
         <div class="ticket-row">
-          <span class="name">${escapeHtml(o.requester_name)}　<span class="sub">${escapeHtml(o.department)}</span></span>
+          <span class="name">${escapeHtml(o.requester_name)}　<span class="sub">${escapeHtml(o.title)}</span></span>
         </div>
         ${o.items.map((it) => `
           <div class="ticket-row">
@@ -357,9 +431,13 @@ async function loadHistory() {
 function bindSpecialForm() {
   document.getElementById('special-form').addEventListener('submit', async (e) => {
     e.preventDefault();
+    if (!requireProfile()) return;
+
     const payload = {
-      requester_name: document.getElementById('sp-name').value.trim(),
-      department: document.getElementById('sp-dept').value.trim(),
+      requester_name: profile.name,
+      title: profile.title,
+      phone: profile.phone,
+      email: profile.email,
       item_name: document.getElementById('sp-item').value.trim(),
       vendor: document.getElementById('sp-vendor').value.trim(),
       purpose: document.getElementById('sp-purpose').value.trim(),
@@ -377,15 +455,6 @@ function bindSpecialForm() {
       showToast(err.message, 'error');
     }
   });
-
-  // 帶入目前識別資訊，方便使用者少打一次字
-  document.getElementById('special-form').addEventListener('focusin', () => {
-    const { name, dept } = getIdentity();
-    const nameEl = document.getElementById('sp-name');
-    const deptEl = document.getElementById('sp-dept');
-    if (!nameEl.value && name) nameEl.value = name;
-    if (!deptEl.value && dept) deptEl.value = dept;
-  }, { once: true });
 }
 
 function bindSpecialSearch() {
@@ -401,9 +470,9 @@ async function loadSpecialRequests() {
 
   const params = new URLSearchParams();
   const name = document.getElementById('sp-hist-name').value.trim();
-  const dept = document.getElementById('sp-hist-dept').value.trim();
+  const title = document.getElementById('sp-hist-title').value.trim();
   if (name) params.set('name', name);
-  if (dept) params.set('department', dept);
+  if (title) params.set('title', title);
 
   try {
     const reqs = await Api.get(`/api/special-requests?${params.toString()}`);
@@ -418,7 +487,7 @@ async function loadSpecialRequests() {
           <span class="badge ${STATUS_CLASS[r.status]}">${STATUS_LABEL[r.status]}</span>
         </div>
         <div class="ticket-row"><span class="name">${escapeHtml(r.item_name)}</span><span class="sub">x${r.quantity}</span></div>
-        <div class="ticket-row sub">${escapeHtml(r.requester_name)} · ${escapeHtml(r.department)} · ${escapeHtml(r.created_at)}</div>
+        <div class="ticket-row sub">${escapeHtml(r.requester_name)} · ${escapeHtml(r.title)} · ${escapeHtml(r.created_at)}</div>
         ${r.vendor ? `<div class="ticket-row sub">廠商：${escapeHtml(r.vendor)}</div>` : ''}
         ${r.budget ? `<div class="ticket-row sub">預算：${escapeHtml(r.budget)}</div>` : ''}
         ${r.purpose ? `<div class="ticket-row sub">用途：${escapeHtml(r.purpose)}</div>` : ''}
