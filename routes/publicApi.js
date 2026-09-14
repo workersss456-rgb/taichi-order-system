@@ -1,43 +1,114 @@
 const express = require('express');
-const db = require('../db');
-const { notifyAdminOfSpecialRequest } = require('../mailer');
+const { pool } = require('../db');
+const {
+  notifyAdminOfSpecialRequest,
+  notifyAdminOfRegistration,
+  notifyUserOfRegistration,
+} = require('../mailer');
 
 const router = express.Router();
 
 // ---------- 商品目錄（分類 -> 子分類 -> 品項），只回傳上架中的品項 ----------
-router.get('/catalog', (req, res) => {
-  const categories = db.prepare('SELECT * FROM categories ORDER BY sort_order, id').all();
-  const subcategories = db.prepare('SELECT * FROM subcategories ORDER BY sort_order, id').all();
-  const items = db.prepare('SELECT * FROM items WHERE active = 1 ORDER BY sort_order, id').all();
+router.get('/catalog', async (req, res) => {
+  try {
+    const categories = (await pool.query('SELECT * FROM categories ORDER BY sort_order, id')).rows;
+    const subcategories = (await pool.query('SELECT * FROM subcategories ORDER BY sort_order, id')).rows;
+    const items = (await pool.query('SELECT * FROM items WHERE active = 1 ORDER BY sort_order, id')).rows;
 
-  const tree = categories.map((cat) => ({
-    ...cat,
-    subcategories: subcategories
-      .filter((sub) => sub.category_id === cat.id)
-      .map((sub) => ({
-        ...sub,
-        items: items
-          .filter((it) => it.subcategory_id === sub.id)
-          .map((it) => ({
-            ...it,
-            specs: JSON.parse(it.specs || '[]'),
-            colors: JSON.parse(it.colors || '[]'),
-          })),
-      })),
-  }));
+    const tree = categories.map((cat) => ({
+      ...cat,
+      subcategories: subcategories
+        .filter((sub) => sub.category_id === cat.id)
+        .map((sub) => ({
+          ...sub,
+          items: items
+            .filter((it) => it.subcategory_id === sub.id)
+            .map((it) => ({
+              ...it,
+              specs: JSON.parse(it.specs || '[]'),
+              colors: JSON.parse(it.colors || '[]'),
+            })),
+        })),
+    }));
 
-  res.json(tree);
+    res.json(tree);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: '讀取商品目錄失敗' });
+  }
+});
+
+// ============================================================
+// 使用者註冊 / 登入（不需要密碼，用姓名／職稱／聯絡手機辨識）
+// ============================================================
+
+router.post('/register', async (req, res) => {
+  try {
+    const { name, title, phone, email } = req.body;
+    if (!name || !name.trim()) return res.status(400).json({ error: '請填寫姓名' });
+    if (!title || !title.trim()) return res.status(400).json({ error: '請填寫職稱' });
+    if (!phone || !phone.trim()) return res.status(400).json({ error: '請填寫聯絡手機' });
+
+    const existing = (await pool.query('SELECT * FROM users WHERE phone = $1', [phone.trim()])).rows[0];
+    let user;
+    let isNew = false;
+
+    if (existing) {
+      user = (await pool.query(
+        `UPDATE users SET name=$1, title=$2, email=$3, updated_at=NOW() WHERE id=$4
+         RETURNING id, name, title, phone, email,
+           TO_CHAR(created_at AT TIME ZONE 'Asia/Taipei', 'YYYY-MM-DD HH24:MI:SS') AS created_at,
+           TO_CHAR(updated_at AT TIME ZONE 'Asia/Taipei', 'YYYY-MM-DD HH24:MI:SS') AS updated_at`,
+        [name.trim(), title.trim(), (email || '').trim(), existing.id]
+      )).rows[0];
+    } else {
+      isNew = true;
+      user = (await pool.query(
+        `INSERT INTO users (name, title, phone, email) VALUES ($1,$2,$3,$4)
+         RETURNING id, name, title, phone, email,
+           TO_CHAR(created_at AT TIME ZONE 'Asia/Taipei', 'YYYY-MM-DD HH24:MI:SS') AS created_at,
+           TO_CHAR(updated_at AT TIME ZONE 'Asia/Taipei', 'YYYY-MM-DD HH24:MI:SS') AS updated_at`,
+        [name.trim(), title.trim(), phone.trim(), (email || '').trim()]
+      )).rows[0];
+    }
+
+    notifyAdminOfRegistration(user).catch((err) => console.error('註冊通知管理員失敗：', err.message));
+    notifyUserOfRegistration(user).catch((err) => console.error('註冊通知使用者本人失敗：', err.message));
+
+    res.status(isNew ? 201 : 200).json(user);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: '註冊失敗，請稍後再試' });
+  }
+});
+
+router.get('/users/lookup', async (req, res) => {
+  try {
+    const { phone } = req.query;
+    if (!phone || !phone.trim()) return res.status(400).json({ error: '請提供聯絡手機' });
+    const user = (await pool.query(
+      `SELECT id, name, title, phone, email,
+         TO_CHAR(created_at AT TIME ZONE 'Asia/Taipei', 'YYYY-MM-DD HH24:MI:SS') AS created_at,
+         TO_CHAR(updated_at AT TIME ZONE 'Asia/Taipei', 'YYYY-MM-DD HH24:MI:SS') AS updated_at
+       FROM users WHERE phone = $1`, [phone.trim()]
+    )).rows[0];
+    if (!user) return res.status(404).json({ error: '查無這組手機號碼的註冊資料，請先完成註冊' });
+    res.json(user);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: '查詢失敗，請稍後再試' });
+  }
 });
 
 // ---------- 送出叫料單（不需審核，送出即完成） ----------
-router.post('/orders', (req, res) => {
-  const { requester_name, department, note, items } = req.body;
+router.post('/orders', async (req, res) => {
+  const { requester_name, title, phone, email, note, items } = req.body;
 
   if (!requester_name || !requester_name.trim()) {
-    return res.status(400).json({ error: '請填寫姓名' });
+    return res.status(400).json({ error: '請先完成註冊/登入（缺少姓名）' });
   }
-  if (!department || !department.trim()) {
-    return res.status(400).json({ error: '請填寫部門' });
+  if (!title || !title.trim()) {
+    return res.status(400).json({ error: '請先完成註冊/登入（缺少職稱）' });
   }
   if (!Array.isArray(items) || items.length === 0) {
     return res.status(400).json({ error: '購物車是空的，請至少選擇一項品項' });
@@ -48,120 +119,134 @@ router.post('/orders', (req, res) => {
     }
   }
 
-  const insertOrder = db.prepare(
-    'INSERT INTO orders (requester_name, department, note) VALUES (?, ?, ?)'
-  );
-  const insertItem = db.prepare(`INSERT INTO order_items
-    (order_id, item_id, item_name, image_url, spec, color, quantity, unit)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)`);
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
 
-  const tx = db.transaction(() => {
-    const orderId = insertOrder.run(requester_name.trim(), department.trim(), note || '').lastInsertRowid;
+    const orderId = (await client.query(
+      'INSERT INTO orders (requester_name, title, phone, email, note) VALUES ($1,$2,$3,$4,$5) RETURNING id',
+      [requester_name.trim(), title.trim(), (phone || '').trim(), (email || '').trim(), note || '']
+    )).rows[0].id;
+
     for (const it of items) {
-      insertItem.run(
-        orderId,
-        it.item_id || null,
-        it.item_name,
-        it.image_url || '',
-        it.spec || '',
-        it.color || '',
-        it.quantity,
-        it.unit || ''
+      await client.query(
+        `INSERT INTO order_items (order_id, item_id, item_name, image_url, spec, color, quantity, unit)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+        [orderId, it.item_id || null, it.item_name, it.image_url || '', it.spec || '', it.color || '', it.quantity, it.unit || '']
       );
     }
-    return orderId;
-  });
 
-  const orderId = tx();
-  const order = db.prepare('SELECT * FROM orders WHERE id = ?').get(orderId);
-  const orderItems = db.prepare('SELECT * FROM order_items WHERE order_id = ?').all(orderId);
-  res.status(201).json({ ...order, items: orderItems });
+    await client.query('COMMIT');
+
+    const order = (await pool.query(
+      `SELECT *, TO_CHAR(created_at AT TIME ZONE 'Asia/Taipei', 'YYYY-MM-DD HH24:MI:SS') AS created_at_fmt
+       FROM orders WHERE id = $1`, [orderId]
+    )).rows[0];
+    order.created_at = order.created_at_fmt;
+    delete order.created_at_fmt;
+    const orderItems = (await pool.query('SELECT * FROM order_items WHERE order_id = $1', [orderId])).rows;
+
+    res.status(201).json({ ...order, items: orderItems });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error(err);
+    res.status(500).json({ error: '送出叫料單失敗，請稍後再試' });
+  } finally {
+    client.release();
+  }
 });
 
 // ---------- 叫料歷史紀錄查詢 ----------
-router.get('/orders', (req, res) => {
-  const { name, department, from, to } = req.query;
-  let sql = 'SELECT * FROM orders WHERE 1=1';
-  const params = [];
+router.get('/orders', async (req, res) => {
+  try {
+    const { name, title, from, to } = req.query;
+    let sql = `SELECT *, TO_CHAR(created_at AT TIME ZONE 'Asia/Taipei', 'YYYY-MM-DD HH24:MI:SS') AS created_at_fmt
+               FROM orders WHERE 1=1`;
+    const params = [];
 
-  if (name) {
-    sql += ' AND requester_name LIKE ?';
-    params.push(`%${name}%`);
-  }
-  if (department) {
-    sql += ' AND department LIKE ?';
-    params.push(`%${department}%`);
-  }
-  if (from) {
-    sql += ' AND date(created_at) >= date(?)';
-    params.push(from);
-  }
-  if (to) {
-    sql += ' AND date(created_at) <= date(?)';
-    params.push(to);
-  }
-  sql += ' ORDER BY id DESC';
+    if (name) { params.push(`%${name}%`); sql += ` AND requester_name ILIKE $${params.length}`; }
+    if (title) { params.push(`%${title}%`); sql += ` AND title ILIKE $${params.length}`; }
+    if (from) { params.push(from); sql += ` AND created_at AT TIME ZONE 'Asia/Taipei' >= $${params.length}::date`; }
+    if (to) { params.push(to); sql += ` AND created_at AT TIME ZONE 'Asia/Taipei' < ($${params.length}::date + INTERVAL '1 day')`; }
+    sql += ' ORDER BY id DESC';
 
-  const orders = db.prepare(sql).all(...params);
-  const itemStmt = db.prepare('SELECT * FROM order_items WHERE order_id = ?');
-  const result = orders.map((o) => ({ ...o, items: itemStmt.all(o.id) }));
-  res.json(result);
+    const orders = (await pool.query(sql, params)).rows.map((o) => {
+      o.created_at = o.created_at_fmt;
+      delete o.created_at_fmt;
+      return o;
+    });
+
+    const result = [];
+    for (const o of orders) {
+      const items = (await pool.query('SELECT * FROM order_items WHERE order_id = $1', [o.id])).rows;
+      result.push({ ...o, items });
+    }
+    res.json(result);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: '查詢歷史紀錄失敗' });
+  }
 });
 
 // ---------- 特殊設備採購申請 ----------
-router.post('/special-requests', (req, res) => {
-  const { requester_name, department, item_name, vendor, purpose, budget, quantity, note } = req.body;
+router.post('/special-requests', async (req, res) => {
+  try {
+    const { requester_name, title, phone, email, item_name, vendor, purpose, budget, quantity, note } = req.body;
 
-  if (!requester_name || !requester_name.trim()) return res.status(400).json({ error: '請填寫姓名' });
-  if (!department || !department.trim()) return res.status(400).json({ error: '請填寫部門' });
-  if (!item_name || !item_name.trim()) return res.status(400).json({ error: '請填寫設備品名' });
+    if (!requester_name || !requester_name.trim()) return res.status(400).json({ error: '請先完成註冊/登入（缺少姓名）' });
+    if (!title || !title.trim()) return res.status(400).json({ error: '請先完成註冊/登入（缺少職稱）' });
+    if (!item_name || !item_name.trim()) return res.status(400).json({ error: '請填寫設備品名' });
 
-  const insert = db.prepare(`INSERT INTO special_requests
-    (requester_name, department, item_name, vendor, purpose, budget, quantity, note)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)`);
+    const created = (await pool.query(
+      `INSERT INTO special_requests
+        (requester_name, title, phone, email, item_name, vendor, purpose, budget, quantity, note)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+       RETURNING *, TO_CHAR(created_at AT TIME ZONE 'Asia/Taipei', 'YYYY-MM-DD HH24:MI:SS') AS created_at_fmt`,
+      [
+        requester_name.trim(), title.trim(), (phone || '').trim(), (email || '').trim(),
+        item_name.trim(), vendor || '', purpose || '', budget || '',
+        quantity && quantity > 0 ? quantity : 1, note || '',
+      ]
+    )).rows[0];
+    created.created_at = created.created_at_fmt;
+    delete created.created_at_fmt;
 
-  const result = insert.run(
-    requester_name.trim(),
-    department.trim(),
-    item_name.trim(),
-    vendor || '',
-    purpose || '',
-    budget || '',
-    quantity && quantity > 0 ? quantity : 1,
-    note || ''
-  );
+    notifyAdminOfSpecialRequest(created).catch((err) => {
+      console.error('特殊採購申請 email 通知失敗：', err.message);
+    });
 
-  const created = db.prepare('SELECT * FROM special_requests WHERE id = ?').get(result.lastInsertRowid);
-
-  // Email 通知管理員（若失敗不影響申請本身已建立成功）
-  notifyAdminOfSpecialRequest(created).catch((err) => {
-    console.error('特殊採購申請 email 通知失敗：', err.message);
-  });
-
-  res.status(201).json(created);
+    res.status(201).json(created);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: '送出申請失敗，請稍後再試' });
+  }
 });
 
 // ---------- 查詢特殊設備採購申請狀態 ----------
-router.get('/special-requests', (req, res) => {
-  const { name, department, status } = req.query;
-  let sql = 'SELECT * FROM special_requests WHERE 1=1';
-  const params = [];
+router.get('/special-requests', async (req, res) => {
+  try {
+    const { name, title, status } = req.query;
+    let sql = `SELECT *,
+                 TO_CHAR(created_at AT TIME ZONE 'Asia/Taipei', 'YYYY-MM-DD HH24:MI:SS') AS created_at_fmt,
+                 TO_CHAR(reviewed_at AT TIME ZONE 'Asia/Taipei', 'YYYY-MM-DD HH24:MI:SS') AS reviewed_at_fmt
+               FROM special_requests WHERE 1=1`;
+    const params = [];
 
-  if (name) {
-    sql += ' AND requester_name LIKE ?';
-    params.push(`%${name}%`);
-  }
-  if (department) {
-    sql += ' AND department LIKE ?';
-    params.push(`%${department}%`);
-  }
-  if (status) {
-    sql += ' AND status = ?';
-    params.push(status);
-  }
-  sql += ' ORDER BY id DESC';
+    if (name) { params.push(`%${name}%`); sql += ` AND requester_name ILIKE $${params.length}`; }
+    if (title) { params.push(`%${title}%`); sql += ` AND title ILIKE $${params.length}`; }
+    if (status) { params.push(status); sql += ` AND status = $${params.length}`; }
+    sql += ' ORDER BY id DESC';
 
-  res.json(db.prepare(sql).all(...params));
+    const rows = (await pool.query(sql, params)).rows.map((r) => {
+      r.created_at = r.created_at_fmt; delete r.created_at_fmt;
+      r.reviewed_at = r.reviewed_at_fmt; delete r.reviewed_at_fmt;
+      return r;
+    });
+    res.json(rows);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: '查詢申請紀錄失敗' });
+  }
 });
 
 module.exports = router;
