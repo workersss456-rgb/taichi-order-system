@@ -51,6 +51,12 @@ async function createTables() {
       phone TEXT,
       email TEXT,
       note TEXT,
+      need_date DATE,
+      site_name TEXT,
+      site_address TEXT,
+      purpose TEXT,
+      delivery_type TEXT,
+      vendor TEXT,
       created_at TIMESTAMPTZ DEFAULT NOW()
     );
 
@@ -63,7 +69,15 @@ async function createTables() {
       spec TEXT,
       color TEXT,
       quantity INTEGER NOT NULL,
-      unit TEXT
+      unit TEXT,
+      note TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS sites (
+      id SERIAL PRIMARY KEY,
+      name TEXT NOT NULL,
+      address TEXT,
+      sort_order INTEGER DEFAULT 0
     );
 
     CREATE TABLE IF NOT EXISTS special_requests (
@@ -93,6 +107,18 @@ async function createTables() {
       created_at TIMESTAMPTZ DEFAULT NOW(),
       updated_at TIMESTAMPTZ DEFAULT NOW()
     );
+  `);
+
+  // 遷移：如果 orders / order_items 是舊版（沒有這次新增的欄位），這裡補上。
+  // Postgres 的 ADD COLUMN IF NOT EXISTS 是安全的，欄位已存在就不會做任何事。
+  await pool.query(`
+    ALTER TABLE orders ADD COLUMN IF NOT EXISTS need_date DATE;
+    ALTER TABLE orders ADD COLUMN IF NOT EXISTS site_name TEXT;
+    ALTER TABLE orders ADD COLUMN IF NOT EXISTS site_address TEXT;
+    ALTER TABLE orders ADD COLUMN IF NOT EXISTS purpose TEXT;
+    ALTER TABLE orders ADD COLUMN IF NOT EXISTS delivery_type TEXT;
+    ALTER TABLE orders ADD COLUMN IF NOT EXISTS vendor TEXT;
+    ALTER TABLE order_items ADD COLUMN IF NOT EXISTS note TEXT;
   `);
 }
 
@@ -134,9 +160,20 @@ async function seedDemoData() {
     JSON.stringify(['4合1', '7合1']), JSON.stringify([]), 2]);
 }
 
+// ---------- 案場示範資料（沒有任何案場時才放入） ----------
+async function seedDemoSites() {
+  const { rows } = await pool.query('SELECT COUNT(*)::int AS c FROM sites');
+  if (rows[0].c > 0) return;
+  await pool.query(
+    'INSERT INTO sites (name, address, sort_order) VALUES ($1,$2,$3)',
+    ['範例案場（請至後台修改或新增）', '台中市南屯區範例路 1 號', 1]
+  );
+}
+
 async function init() {
   await createTables();
   await seedDemoData();
+  await seedDemoSites();
 }
 
 module.exports = { pool, init };
