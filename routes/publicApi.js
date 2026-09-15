@@ -38,6 +38,17 @@ router.get('/catalog', async (req, res) => {
   }
 });
 
+// ---------- 案場清單（案場名稱 + 地址對照，給下單頁面下拉選單用） ----------
+router.get('/sites', async (req, res) => {
+  try {
+    const sites = (await pool.query('SELECT id, name, address FROM sites ORDER BY sort_order, id')).rows;
+    res.json(sites);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: '讀取案場清單失敗' });
+  }
+});
+
 // ============================================================
 // 使用者註冊 / 登入（不需要密碼，用姓名／職稱／聯絡手機辨識）
 // ============================================================
@@ -102,13 +113,23 @@ router.get('/users/lookup', async (req, res) => {
 
 // ---------- 送出叫料單（不需審核，送出即完成） ----------
 router.post('/orders', async (req, res) => {
-  const { requester_name, title, phone, email, note, items } = req.body;
+  const {
+    requester_name, title, phone, email, note, items,
+    need_date, site_name, site_address, purpose, delivery_type,
+  } = req.body;
 
   if (!requester_name || !requester_name.trim()) {
     return res.status(400).json({ error: '請先完成註冊/登入（缺少姓名）' });
   }
   if (!title || !title.trim()) {
     return res.status(400).json({ error: '請先完成註冊/登入（缺少職稱）' });
+  }
+  if (!need_date) return res.status(400).json({ error: '請選擇需求日' });
+  if (!site_name || !site_name.trim()) return res.status(400).json({ error: '請選擇案場名稱' });
+  if (!site_address || !site_address.trim()) return res.status(400).json({ error: '請填寫送貨地址' });
+  if (!purpose || !purpose.trim()) return res.status(400).json({ error: '請填寫施工用途' });
+  if (!delivery_type || !['訂貨', '自取'].includes(delivery_type)) {
+    return res.status(400).json({ error: '請選擇類別（訂貨或自取）' });
   }
   if (!Array.isArray(items) || items.length === 0) {
     return res.status(400).json({ error: '購物車是空的，請至少選擇一項品項' });
@@ -124,26 +145,34 @@ router.post('/orders', async (req, res) => {
     await client.query('BEGIN');
 
     const orderId = (await client.query(
-      'INSERT INTO orders (requester_name, title, phone, email, note) VALUES ($1,$2,$3,$4,$5) RETURNING id',
-      [requester_name.trim(), title.trim(), (phone || '').trim(), (email || '').trim(), note || '']
+      `INSERT INTO orders
+        (requester_name, title, phone, email, note, need_date, site_name, site_address, purpose, delivery_type)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id`,
+      [
+        requester_name.trim(), title.trim(), (phone || '').trim(), (email || '').trim(), note || '',
+        need_date, site_name.trim(), site_address.trim(), purpose.trim(), delivery_type,
+      ]
     )).rows[0].id;
 
     for (const it of items) {
       await client.query(
-        `INSERT INTO order_items (order_id, item_id, item_name, image_url, spec, color, quantity, unit)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
-        [orderId, it.item_id || null, it.item_name, it.image_url || '', it.spec || '', it.color || '', it.quantity, it.unit || '']
+        `INSERT INTO order_items (order_id, item_id, item_name, image_url, spec, color, quantity, unit, note)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+        [orderId, it.item_id || null, it.item_name, it.image_url || '', it.spec || '', it.color || '', it.quantity, it.unit || '', it.note || '']
       );
     }
 
     await client.query('COMMIT');
 
     const order = (await pool.query(
-      `SELECT *, TO_CHAR(created_at AT TIME ZONE 'Asia/Taipei', 'YYYY-MM-DD HH24:MI:SS') AS created_at_fmt
+      `SELECT *, TO_CHAR(created_at AT TIME ZONE 'Asia/Taipei', 'YYYY-MM-DD HH24:MI:SS') AS created_at_fmt,
+                 TO_CHAR(need_date, 'YYYY-MM-DD') AS need_date_fmt
        FROM orders WHERE id = $1`, [orderId]
     )).rows[0];
     order.created_at = order.created_at_fmt;
     delete order.created_at_fmt;
+    order.need_date = order.need_date_fmt;
+    delete order.need_date_fmt;
     const orderItems = (await pool.query('SELECT * FROM order_items WHERE order_id = $1', [orderId])).rows;
 
     res.status(201).json({ ...order, items: orderItems });
@@ -156,11 +185,33 @@ router.post('/orders', async (req, res) => {
   }
 });
 
+// ---------- 單筆叫料單查詢（列印單據用） ----------
+router.get('/orders/:id', async (req, res) => {
+  try {
+    const order = (await pool.query(
+      `SELECT *, TO_CHAR(created_at AT TIME ZONE 'Asia/Taipei', 'YYYY-MM-DD HH24:MI:SS') AS created_at_fmt,
+                 TO_CHAR(need_date, 'YYYY-MM-DD') AS need_date_fmt
+       FROM orders WHERE id = $1`, [req.params.id]
+    )).rows[0];
+    if (!order) return res.status(404).json({ error: '找不到這筆叫料單' });
+    order.created_at = order.created_at_fmt;
+    delete order.created_at_fmt;
+    order.need_date = order.need_date_fmt;
+    delete order.need_date_fmt;
+    const items = (await pool.query('SELECT * FROM order_items WHERE order_id = $1 ORDER BY id', [order.id])).rows;
+    res.json({ ...order, items });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: '查詢叫料單失敗' });
+  }
+});
+
 // ---------- 叫料歷史紀錄查詢 ----------
 router.get('/orders', async (req, res) => {
   try {
     const { name, title, from, to } = req.query;
-    let sql = `SELECT *, TO_CHAR(created_at AT TIME ZONE 'Asia/Taipei', 'YYYY-MM-DD HH24:MI:SS') AS created_at_fmt
+    let sql = `SELECT *, TO_CHAR(created_at AT TIME ZONE 'Asia/Taipei', 'YYYY-MM-DD HH24:MI:SS') AS created_at_fmt,
+                 TO_CHAR(need_date, 'YYYY-MM-DD') AS need_date_fmt
                FROM orders WHERE 1=1`;
     const params = [];
 
@@ -173,6 +224,8 @@ router.get('/orders', async (req, res) => {
     const orders = (await pool.query(sql, params)).rows.map((o) => {
       o.created_at = o.created_at_fmt;
       delete o.created_at_fmt;
+      o.need_date = o.need_date_fmt;
+      delete o.need_date_fmt;
       return o;
     });
 

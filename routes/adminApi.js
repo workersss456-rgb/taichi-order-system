@@ -159,6 +159,75 @@ router.delete('/items/:id', async (req, res) => {
   }
 });
 
+// ---------- 案場管理（名稱 + 送貨地址對照） ----------
+router.get('/sites', async (req, res) => {
+  try {
+    const rows = (await pool.query('SELECT * FROM sites ORDER BY sort_order, id')).rows;
+    res.json(rows);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: '讀取案場清單失敗' });
+  }
+});
+
+router.post('/sites', async (req, res) => {
+  try {
+    const { name, address, sort_order } = req.body;
+    if (!name || !name.trim()) return res.status(400).json({ error: '請輸入案場名稱' });
+    const row = (await pool.query(
+      'INSERT INTO sites (name, address, sort_order) VALUES ($1,$2,$3) RETURNING *',
+      [name.trim(), address || '', sort_order || 0]
+    )).rows[0];
+    res.status(201).json(row);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: '新增案場失敗' });
+  }
+});
+
+router.put('/sites/:id', async (req, res) => {
+  try {
+    const { name, address, sort_order } = req.body;
+    if (!name || !name.trim()) return res.status(400).json({ error: '請輸入案場名稱' });
+    const row = (await pool.query(
+      'UPDATE sites SET name=$1, address=$2, sort_order=$3 WHERE id=$4 RETURNING *',
+      [name.trim(), address || '', sort_order || 0, req.params.id]
+    )).rows[0];
+    res.json(row);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: '更新案場失敗' });
+  }
+});
+
+router.delete('/sites/:id', async (req, res) => {
+  try {
+    await pool.query('DELETE FROM sites WHERE id = $1', [req.params.id]);
+    res.json({ ok: true });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: '刪除案場失敗' });
+  }
+});
+
+// ---------- 訂單廠商填寫（採購處理後填入，供列印單據使用） ----------
+router.put('/orders/:id/vendor', async (req, res) => {
+  try {
+    const { vendor } = req.body;
+    const row = (await pool.query(
+      `UPDATE orders SET vendor=$1 WHERE id=$2
+       RETURNING *, TO_CHAR(created_at AT TIME ZONE 'Asia/Taipei', 'YYYY-MM-DD HH24:MI:SS') AS created_at_fmt`,
+      [vendor || '', req.params.id]
+    )).rows[0];
+    if (!row) return res.status(404).json({ error: '找不到這筆叫料單' });
+    row.created_at = row.created_at_fmt; delete row.created_at_fmt;
+    res.json(row);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: '更新廠商失敗' });
+  }
+});
+
 // ---------- 特殊設備採購審核 ----------
 router.put('/special-requests/:id', async (req, res) => {
   try {
@@ -186,15 +255,19 @@ router.put('/special-requests/:id', async (req, res) => {
 router.get('/orders/export.csv', async (req, res) => {
   try {
     const orders = (await pool.query(
-      `SELECT *, TO_CHAR(created_at AT TIME ZONE 'Asia/Taipei', 'YYYY-MM-DD HH24:MI:SS') AS created_at_fmt
+      `SELECT *, TO_CHAR(created_at AT TIME ZONE 'Asia/Taipei', 'YYYY-MM-DD HH24:MI:SS') AS created_at_fmt,
+                 TO_CHAR(need_date, 'YYYY-MM-DD') AS need_date_fmt
        FROM orders ORDER BY id DESC`
     )).rows;
 
-    const rows = [['單號', '申請人', '職稱', '聯絡手機', '時間', '品項', '規格', '顏色', '數量', '單位', '備註']];
+    const rows = [['單號', '申請人', '職稱', '聯絡手機', '需求日', '案場名稱', '送貨地址', '施工用途', '類別', '廠商', '時間', '品項', '規格', '顏色', '數量', '單位', '品項備註', '訂單備註']];
     for (const o of orders) {
       const items = (await pool.query('SELECT * FROM order_items WHERE order_id = $1', [o.id])).rows;
       for (const it of items) {
-        rows.push([o.id, o.requester_name, o.title, o.phone, o.created_at_fmt, it.item_name, it.spec, it.color, it.quantity, it.unit, o.note]);
+        rows.push([
+          o.id, o.requester_name, o.title, o.phone, o.need_date_fmt, o.site_name, o.site_address, o.purpose, o.delivery_type, o.vendor,
+          o.created_at_fmt, it.item_name, it.spec, it.color, it.quantity, it.unit, it.note, o.note,
+        ]);
       }
     }
 
