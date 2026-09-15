@@ -37,7 +37,10 @@ function renderPrintHtml(order) {
   `).join('');
 
   return `
-    <div class="doc-title">${escapeHtml(docTitle)}<div style="font-size:10pt; font-weight:400; margin-top:4px;">訂購單　單號 ${orderNo}</div></div>
+    <div class="doc-header">
+      <img src="images/logo.png" alt="太綺水電 TaiChi EMP">
+      <div class="doc-title">${escapeHtml(docTitle)}<div class="sub-line">訂購單　單號 ${orderNo}</div></div>
+    </div>
 
     <table class="info-table">
       <tr>
@@ -60,7 +63,7 @@ function renderPrintHtml(order) {
 
     <table class="item-table">
       <thead>
-        <tr class="repeat-title"><th colspan="6">${escapeHtml(docTitle)}　訂購單　單號 ${orderNo}</th></tr>
+        <tr class="repeat-title"><th colspan="6"><img src="images/logo.png" alt="">${escapeHtml(docTitle)}　訂購單　單號 ${orderNo}</th></tr>
         <tr class="col-head">
           <th class="col-no">項次</th><th>名稱</th><th>規格</th><th class="col-qty">數量</th><th class="col-unit">單位</th><th>備註</th>
         </tr>
@@ -74,10 +77,9 @@ function renderPrintHtml(order) {
           <td colspan="6" style="padding:0;">
             <div class="sign-row">
               <div class="sign-box"><div class="sign-label">總經理</div><div class="sign-space"></div></div>
-              <div class="sign-box"><div class="sign-label">成控主管</div><div class="sign-space"></div></div>
-              <div class="sign-box"><div class="sign-label">工務主管</div><div class="sign-space"></div></div>
-              <div class="sign-box"><div class="sign-label">現場主管</div><div class="sign-space"></div></div>
-              <div class="sign-box"><div class="sign-label">採購</div><div class="sign-space"></div></div>
+              <div class="sign-box"><div class="sign-label">成控部</div><div class="sign-space"></div></div>
+              <div class="sign-box"><div class="sign-label">採購課</div><div class="sign-space"></div></div>
+              <div class="sign-box"><div class="sign-label">工務部</div><div class="sign-space"></div></div>
             </div>
           </td>
         </tr>
