@@ -344,6 +344,21 @@ a { color: var(--primary); }
 .field input:focus, .field select:focus, .field textarea:focus { outline: 2px solid var(--primary); outline-offset: 1px; background: var(--surface); }
 .field textarea { resize: vertical; min-height: 60px; }
 
+.radio-group { display: flex; gap: 16px; padding: 9px 2px; }
+.radio-option { display: flex; align-items: center; gap: 6px; font-size: 14px; font-weight: 500; color: var(--text); cursor: pointer; }
+.radio-option input[type="radio"] { width: auto; }
+
+.cart-line-note {
+  width: 100%;
+  margin-top: 6px;
+  padding: 6px 9px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-sunken);
+  font-size: 12.5px;
+}
+.cart-line-note:focus { outline: 2px solid var(--primary); outline-offset: 1px; background: var(--surface); }
+
 /* ---------- 票據 / 憑條風格（歷史紀錄 & 送出成功） ---------- */
 .ticket {
   background: var(--surface);
