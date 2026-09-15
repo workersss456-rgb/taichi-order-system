@@ -30,6 +30,7 @@
   <aside class="admin-sidebar">
     <div class="brand"><span class="brand-mark">叫</span>管理後台</div>
     <button class="admin-nav-item active" data-panel="items">品項管理</button>
+    <button class="admin-nav-item" data-panel="sites">案場管理</button>
     <button class="admin-nav-item" data-panel="special">特殊採購審核</button>
     <button class="admin-nav-item" data-panel="history">叫料歷史紀錄</button>
     <a href="index.html" class="admin-nav-item" style="text-decoration:none; display:block;">← 回到商城</a>
@@ -82,6 +83,36 @@
             <button type="button" class="btn btn-secondary" id="item-form-cancel">取消</button>
           </div>
         </form>
+      </div>
+    </section>
+
+    <!-- ---- 案場管理 ---- -->
+    <section class="admin-panel" id="panel-sites">
+      <div class="section-title"><div><span class="eyebrow">Sites</span><h2>案場管理</h2></div></div>
+      <p class="small-note" style="margin-bottom:14px;">維護案場名稱與送貨地址對照，下單頁面的「案場名稱」下拉選單會從這裡讀取。</p>
+
+      <div class="card" style="margin-bottom:20px;">
+        <h3 style="font-size:14px; margin-bottom:12px;" id="site-form-title">新增案場</h3>
+        <form id="site-form">
+          <input type="hidden" id="site-id">
+          <div class="field"><label>案場名稱</label><input type="text" id="site-name" required></div>
+          <div class="field"><label>送貨地址</label><input type="text" id="site-address"></div>
+          <div class="field"><label>排序（數字越小越前面）</label><input type="number" id="site-sort" value="0"></div>
+          <div class="modal-actions" style="margin-top:4px;">
+            <button type="submit" class="btn btn-primary">儲存</button>
+            <button type="button" class="btn btn-secondary" id="site-form-cancel" style="display:none;">取消編輯</button>
+          </div>
+        </form>
+      </div>
+
+      <div class="card">
+        <h3 style="font-size:14px; margin-bottom:12px;">案場清單</h3>
+        <div style="overflow-x:auto;">
+          <table class="table" id="sites-table">
+            <thead><tr><th>案場名稱</th><th>送貨地址</th><th>排序</th><th>操作</th></tr></thead>
+            <tbody id="sites-tbody"></tbody>
+          </table>
+        </div>
       </div>
     </section>
 

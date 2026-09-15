@@ -109,6 +109,17 @@
     <div class="empty-state"><div class="icon">🛒</div>購物車是空的</div>
   </div>
   <div class="cart-drawer-footer">
+    <div class="field"><label>需求日</label><input type="date" id="cart-need-date"></div>
+    <div class="field"><label>案場名稱</label><select id="cart-site"><option value="">請選擇案場</option></select></div>
+    <div class="field"><label>送貨地址</label><input type="text" id="cart-address" placeholder="選擇案場後會自動帶入，可自行修改"></div>
+    <div class="field"><label>施工用途</label><input type="text" id="cart-purpose" placeholder="例如：3F 廁所漏水維修"></div>
+    <div class="field">
+      <label>類別</label>
+      <div class="radio-group">
+        <label class="radio-option"><input type="radio" name="cart-delivery-type" value="訂貨" checked> 訂貨</label>
+        <label class="radio-option"><input type="radio" name="cart-delivery-type" value="自取"> 自取</label>
+      </div>
+    </div>
     <div class="field"><label>備註（選填）</label><textarea id="cart-note" placeholder="給管理員的備註…"></textarea></div>
     <button class="btn btn-primary btn-block" id="cart-submit">送出叫料單</button>
   </div>
@@ -126,6 +137,7 @@
       <div id="confirm-items"></div>
     </div>
     <div class="modal-actions">
+      <button class="btn btn-secondary btn-block" id="confirm-print">列印單據</button>
       <button class="btn btn-primary btn-block" id="confirm-close">完成</button>
     </div>
   </div>
