@@ -1,6 +1,7 @@
 let catalog = [];
 let cart = [];
 let profile = null; // { id, name, title, phone, email }
+let sites = []; // { id, name, address }
 
 // ---------- 初始化 ----------
 document.addEventListener('DOMContentLoaded', async () => {
@@ -11,6 +12,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   bindSpecialForm();
   bindHistorySearch();
   bindSpecialSearch();
+  loadSites();
 
   try {
     catalog = await Api.get('/api/catalog');
@@ -20,6 +22,22 @@ document.addEventListener('DOMContentLoaded', async () => {
       `<div class="empty-state"><div class="icon">⚠️</div>商品目錄載入失敗：${escapeHtml(err.message)}</div>`;
   }
 });
+
+// ---------- 案場清單 ----------
+async function loadSites() {
+  try {
+    sites = await Api.get('/api/sites');
+    const select = document.getElementById('cart-site');
+    select.innerHTML = '<option value="">請選擇案場</option>' +
+      sites.map((s) => `<option value="${s.id}">${escapeHtml(s.name)}</option>`).join('');
+    select.addEventListener('change', () => {
+      const site = sites.find((s) => s.id === +select.value);
+      document.getElementById('cart-address').value = site ? (site.address || '') : '';
+    });
+  } catch (err) {
+    showToast('案場清單載入失敗：' + err.message, 'error');
+  }
+}
 
 // ============================================================
 // 身份：註冊 / 登入（不需密碼，用聯絡手機辨識）
@@ -243,6 +261,7 @@ function bindItemCard(card) {
       spec: specEl ? specEl.value : '',
       color: colorEl ? colorEl.value : '',
       quantity: qty,
+      note: '',
     });
     qtyInput.value = 1;
     showToast(`已加入購物車：${data.name}`, 'success');
@@ -289,9 +308,14 @@ function renderCart() {
           <span class="small-note">${escapeHtml(l.unit || '')}</span>
           <button type="button" class="btn btn-danger btn-sm cart-remove" data-i="${i}" style="margin-left:auto;">移除</button>
         </div>
+        <input type="text" class="cart-line-note" data-i="${i}" placeholder="這項的備註（選填）" value="${escapeAttr(l.note || '')}">
       </div>
     </div>
   `).join('');
+
+  body.querySelectorAll('.cart-line-note').forEach((inp) => inp.addEventListener('input', () => {
+    cart[+inp.dataset.i].note = inp.value;
+  }));
 
   body.querySelectorAll('.qty-minus').forEach((b) => b.addEventListener('click', () => {
     const i = +b.dataset.i;
@@ -339,7 +363,19 @@ async function submitOrder() {
   if (!requireProfile()) return;
   if (!cart.length) return showToast('購物車是空的', 'error');
 
+  const need_date = document.getElementById('cart-need-date').value;
+  const siteSelect = document.getElementById('cart-site');
+  const site_name = siteSelect.options[siteSelect.selectedIndex]?.text || '';
+  const site_address = document.getElementById('cart-address').value.trim();
+  const purpose = document.getElementById('cart-purpose').value.trim();
+  const delivery_type = document.querySelector('input[name="cart-delivery-type"]:checked')?.value || '';
   const note = document.getElementById('cart-note').value.trim();
+
+  if (!need_date) return showToast('請選擇需求日', 'error');
+  if (!siteSelect.value) return showToast('請選擇案場名稱', 'error');
+  if (!site_address) return showToast('請填寫送貨地址', 'error');
+  if (!purpose) return showToast('請填寫施工用途', 'error');
+
   const submitBtn = document.getElementById('cart-submit');
   submitBtn.disabled = true;
   submitBtn.textContent = '送出中…';
@@ -352,10 +388,19 @@ async function submitOrder() {
       email: profile.email,
       note,
       items: cart,
+      need_date,
+      site_name,
+      site_address,
+      purpose,
+      delivery_type,
     });
     cart = [];
     renderCart();
     document.getElementById('cart-note').value = '';
+    document.getElementById('cart-need-date').value = '';
+    document.getElementById('cart-site').value = '';
+    document.getElementById('cart-address').value = '';
+    document.getElementById('cart-purpose').value = '';
     document.getElementById('cart-drawer').classList.remove('open');
     document.getElementById('overlay').classList.remove('open');
     showOrderConfirmation(order);
@@ -377,6 +422,9 @@ function showOrderConfirmation(order) {
     </div>
   `).join('');
   document.getElementById('confirm-modal').style.display = 'flex';
+  document.getElementById('confirm-print').onclick = () => {
+    window.open(`print-order.html?id=${order.id}`, '_blank');
+  };
 }
 
 // ---------- 歷史紀錄 ----------
@@ -411,8 +459,9 @@ async function loadHistory() {
           <span class="ticket-meta">${escapeHtml(o.created_at)}</span>
         </div>
         <div class="ticket-row">
-          <span class="name">${escapeHtml(o.requester_name)}　<span class="sub">${escapeHtml(o.title)}</span></span>
+          <span class="name">${escapeHtml(o.requester_name)}　<span class="sub">${escapeHtml(o.title)}${o.phone ? ' · ' + escapeHtml(o.phone) : ''}</span></span>
         </div>
+        <div class="ticket-row sub">案場：${escapeHtml(o.site_name || '-')}　需求日：${escapeHtml(o.need_date || '-')}　類別：${escapeHtml(o.delivery_type || '-')}</div>
         ${o.items.map((it) => `
           <div class="ticket-row">
             <span class="name">${escapeHtml(it.item_name)} ${[it.spec, it.color].filter(Boolean).map((s) => `· ${escapeHtml(s)}`).join(' ')}</span>
@@ -420,8 +469,15 @@ async function loadHistory() {
           </div>
         `).join('')}
         ${o.note ? `<div class="ticket-row sub" style="margin-top:6px;">備註：${escapeHtml(o.note)}</div>` : ''}
+        <div class="ticket-row" style="margin-top:10px;">
+          <button type="button" class="btn btn-secondary btn-sm print-order-btn" data-id="${o.id}">列印單據</button>
+        </div>
       </div>
     `).join('');
+
+    list.querySelectorAll('.print-order-btn').forEach((btn) => {
+      btn.addEventListener('click', () => window.open(`print-order.html?id=${btn.dataset.id}`, '_blank'));
+    });
   } catch (err) {
     list.innerHTML = `<div class="empty-state"><div class="icon">⚠️</div>${escapeHtml(err.message)}</div>`;
   }

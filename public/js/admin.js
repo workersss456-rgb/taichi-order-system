@@ -1,11 +1,13 @@
 let categories = [];
 let subcategories = [];
 let items = [];
+let sites = [];
 
 document.addEventListener('DOMContentLoaded', () => {
   bindLogin();
   bindAdminNav();
   bindCatalogManagement();
+  bindSiteManagement();
   bindSpecialReview();
   bindHistoryPanel();
 
@@ -54,6 +56,7 @@ function enterAdmin() {
   document.getElementById('login-screen').style.display = 'none';
   document.getElementById('admin-shell').style.display = 'grid';
   loadCatalogManagement();
+  loadSiteManagement();
   loadSpecialReview();
   loadHistoryPanel();
 }
@@ -260,6 +263,90 @@ function splitCsv(str) {
 }
 
 // ============================================================
+// 案場管理
+// ============================================================
+function bindSiteManagement() {
+  document.getElementById('site-form').addEventListener('submit', submitSiteForm);
+  document.getElementById('site-form-cancel').addEventListener('click', closeSiteForm);
+}
+
+async function loadSiteManagement() {
+  try {
+    sites = await Api.get('/api/admin/sites', true);
+    renderSitesTable();
+  } catch (err) {
+    showToast(err.message, 'error');
+  }
+}
+
+function renderSitesTable() {
+  const tbody = document.getElementById('sites-tbody');
+  if (!sites.length) {
+    tbody.innerHTML = `<tr><td colspan="4" class="small-note" style="text-align:center; padding:20px;">還沒有任何案場，先在上面新增一個吧</td></tr>`;
+    return;
+  }
+  tbody.innerHTML = sites.map((s) => `
+    <tr>
+      <td>${escapeHtml(s.name)}</td>
+      <td>${escapeHtml(s.address || '—')}</td>
+      <td>${s.sort_order}</td>
+      <td class="actions">
+        <button class="btn btn-secondary btn-sm" data-edit-site="${s.id}">編輯</button>
+        <button class="btn btn-danger btn-sm" data-del-site="${s.id}">刪除</button>
+      </td>
+    </tr>
+  `).join('');
+
+  tbody.querySelectorAll('[data-edit-site]').forEach((btn) => btn.addEventListener('click', () => {
+    const site = sites.find((s) => s.id === +btn.dataset.editSite);
+    if (site) openSiteForm(site);
+  }));
+  tbody.querySelectorAll('[data-del-site]').forEach((btn) => btn.addEventListener('click', async () => {
+    if (!confirm('確定要刪除這個案場嗎？（過去已送出的叫料單地址是快照保存，不受影響）')) return;
+    try {
+      await Api.del(`/api/admin/sites/${btn.dataset.delSite}`, true);
+      loadSiteManagement();
+      showToast('案場已刪除', 'success');
+    } catch (err) { showToast(err.message, 'error'); }
+  }));
+}
+
+function openSiteForm(site) {
+  document.getElementById('site-form-title').textContent = site ? '編輯案場' : '新增案場';
+  document.getElementById('site-id').value = site ? site.id : '';
+  document.getElementById('site-name').value = site ? site.name : '';
+  document.getElementById('site-address').value = site ? (site.address || '') : '';
+  document.getElementById('site-sort').value = site ? site.sort_order : 0;
+  document.getElementById('site-form-cancel').style.display = site ? 'inline-block' : 'none';
+}
+
+function closeSiteForm() {
+  document.getElementById('site-form').reset();
+  document.getElementById('site-id').value = '';
+  document.getElementById('site-form-title').textContent = '新增案場';
+  document.getElementById('site-form-cancel').style.display = 'none';
+}
+
+async function submitSiteForm(e) {
+  e.preventDefault();
+  const id = document.getElementById('site-id').value;
+  const payload = {
+    name: document.getElementById('site-name').value.trim(),
+    address: document.getElementById('site-address').value.trim(),
+    sort_order: +document.getElementById('site-sort').value || 0,
+  };
+  try {
+    if (id) await Api.put(`/api/admin/sites/${id}`, payload, true);
+    else await Api.post('/api/admin/sites', payload, true);
+    closeSiteForm();
+    loadSiteManagement();
+    showToast('案場已儲存', 'success');
+  } catch (err) {
+    showToast(err.message, 'error');
+  }
+}
+
+// ============================================================
 // 特殊採購審核
 // ============================================================
 function bindSpecialReview() {
@@ -356,15 +443,36 @@ async function loadHistoryPanel() {
           <span class="ticket-meta">${escapeHtml(o.created_at)}</span>
         </div>
         <div class="ticket-row"><span class="name">${escapeHtml(o.requester_name)}　<span class="sub">${escapeHtml(o.title)}${o.phone ? ' · ' + escapeHtml(o.phone) : ''}</span></span></div>
+        <div class="ticket-row sub">
+          案場：${escapeHtml(o.site_name || '-')}　需求日：${escapeHtml(o.need_date || '-')}　類別：${escapeHtml(o.delivery_type || '-')}
+        </div>
+        <div class="ticket-row sub">送貨地址：${escapeHtml(o.site_address || '-')}　施工用途：${escapeHtml(o.purpose || '-')}</div>
         ${o.items.map((it) => `
           <div class="ticket-row">
             <span class="name">${escapeHtml(it.item_name)} ${[it.spec, it.color].filter(Boolean).map((s) => `· ${escapeHtml(s)}`).join(' ')}</span>
             <span class="sub">x${it.quantity} ${escapeHtml(it.unit || '')}</span>
           </div>
+          ${it.note ? `<div class="ticket-row sub" style="padding-left:12px;">　備註：${escapeHtml(it.note)}</div>` : ''}
         `).join('')}
-        ${o.note ? `<div class="ticket-row sub" style="margin-top:6px;">備註：${escapeHtml(o.note)}</div>` : ''}
+        ${o.note ? `<div class="ticket-row sub" style="margin-top:6px;">訂單備註：${escapeHtml(o.note)}</div>` : ''}
+        <div class="ticket-row" style="margin-top:10px; gap:8px; align-items:center;">
+          <input type="text" class="vendor-input" data-id="${o.id}" placeholder="廠商（採購填寫）" value="${escapeAttr(o.vendor || '')}" style="flex:1; padding:6px 9px; border:1px solid var(--border); border-radius:6px; background:var(--surface-sunken);">
+          <button class="btn btn-secondary btn-sm save-vendor-btn" data-id="${o.id}">儲存廠商</button>
+          <button class="btn btn-secondary btn-sm print-order-btn" data-id="${o.id}">列印單據</button>
+        </div>
       </div>
     `).join('');
+
+    list.querySelectorAll('.save-vendor-btn').forEach((btn) => btn.addEventListener('click', async () => {
+      const input = list.querySelector(`.vendor-input[data-id="${btn.dataset.id}"]`);
+      try {
+        await Api.put(`/api/admin/orders/${btn.dataset.id}/vendor`, { vendor: input.value.trim() }, true);
+        showToast('廠商已更新', 'success');
+      } catch (err) { showToast(err.message, 'error'); }
+    }));
+    list.querySelectorAll('.print-order-btn').forEach((btn) => {
+      btn.addEventListener('click', () => window.open(`print-order.html?id=${btn.dataset.id}`, '_blank'));
+    });
   } catch (err) {
     list.innerHTML = `<div class="empty-state"><div class="icon">⚠️</div>${escapeHtml(err.message)}</div>`;
   }
