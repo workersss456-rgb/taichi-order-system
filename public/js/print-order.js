@@ -71,19 +71,19 @@ function renderPrintHtml(order) {
       <tbody>
         ${itemRows}
       </tbody>
-      <tfoot>
-        <tr><td colspan="6" class="remark-cell">備註：${escapeHtml(order.note || '')}</td></tr>
-        <tr>
-          <td colspan="6" style="padding:0;">
-            <div class="sign-row">
-              <div class="sign-box"><div class="sign-label">總經理</div><div class="sign-space"></div></div>
-              <div class="sign-box"><div class="sign-label">成控部</div><div class="sign-space"></div></div>
-              <div class="sign-box"><div class="sign-label">採購課</div><div class="sign-space"></div></div>
-              <div class="sign-box"><div class="sign-label">工務部</div><div class="sign-space"></div></div>
-            </div>
-          </td>
-        </tr>
-      </tfoot>
+    </table>
+    <table class="footer-table">
+      <tr><td colspan="6" class="remark-cell">備註：${escapeHtml(order.note || '')}</td></tr>
+      <tr>
+        <td colspan="6" style="padding:0;">
+          <div class="sign-row">
+            <div class="sign-box"><div class="sign-label">總經理</div><div class="sign-space"></div></div>
+            <div class="sign-box"><div class="sign-label">成控部</div><div class="sign-space"></div></div>
+            <div class="sign-box"><div class="sign-label">採購課</div><div class="sign-space"></div></div>
+            <div class="sign-box"><div class="sign-label">工務部</div><div class="sign-space"></div></div>
+          </div>
+        </td>
+      </tr>
     </table>
   `;
 }
