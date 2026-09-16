@@ -78,7 +78,8 @@ async function createTables() {
       note TEXT,
       list_price NUMERIC(12,2),
       discount NUMERIC(6,4),
-      unit_price NUMERIC(12,2)
+      unit_price NUMERIC(12,2),
+      has_issue BOOLEAN DEFAULT false
     );
 
     CREATE TABLE IF NOT EXISTS sites (
@@ -141,6 +142,7 @@ async function createTables() {
     ALTER TABLE order_items ADD COLUMN IF NOT EXISTS list_price NUMERIC(12,2);
     ALTER TABLE order_items ADD COLUMN IF NOT EXISTS discount NUMERIC(6,4);
     ALTER TABLE order_items ADD COLUMN IF NOT EXISTS unit_price NUMERIC(12,2);
+    ALTER TABLE order_items ADD COLUMN IF NOT EXISTS has_issue BOOLEAN DEFAULT false;
   `);
 }
 
