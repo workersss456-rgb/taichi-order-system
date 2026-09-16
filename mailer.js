@@ -105,6 +105,56 @@ async function notifyUserOfRegistration(user) {
   });
 }
 
+// ---------- 訂單狀態通知：現場回報異常 / 結案（管理員 + 訂購人本人） ----------
+async function notifyOrderStatusEvent({ order, eventType, extra }) {
+  const smtp = config.smtp;
+  const transporter = getTransporter();
+  if (!transporter) {
+    console.log(`ℹ️  SMTP 尚未啟用，略過訂單狀態通知（${eventType}）。`);
+    return;
+  }
+
+  const orderNo = `#${String(order.id).padStart(5, '0')}`;
+  const presets = {
+    issue_reported: {
+      subject: `【叫料系統】訂單 ${orderNo} 現場回報異常，待採購處理`,
+      heading: '現場收貨回報異常，需要採購處理',
+      extraLabel: '異常說明',
+    },
+    closed: {
+      subject: `【叫料系統】訂單 ${orderNo} 已結案`,
+      heading: '訂單已完成結案',
+      extraLabel: '採購處理內容',
+    },
+  };
+  const preset = presets[eventType];
+  if (!preset) return;
+
+  const html = `
+    <h3>${preset.heading}</h3>
+    <table border="1" cellpadding="6" cellspacing="0">
+      <tr><td>單號</td><td>${orderNo}</td></tr>
+      <tr><td>訂購人</td><td>${escapeHtml(order.requester_name)}</td></tr>
+      <tr><td>職稱</td><td>${escapeHtml(order.title || '-')}</td></tr>
+      <tr><td>案場名稱</td><td>${escapeHtml(order.site_name || '-')}</td></tr>
+      <tr><td>需求日</td><td>${escapeHtml(order.need_date || '-')}</td></tr>
+      <tr><td>廠商</td><td>${escapeHtml(order.vendor || '-')}</td></tr>
+      ${extra ? `<tr><td>${preset.extraLabel}</td><td>${escapeHtml(extra)}</td></tr>` : ''}
+    </table>
+    <p>可登入系統查看這筆訂單的完整內容。</p>
+  `;
+
+  const recipients = [smtp.adminNotifyEmail];
+  if (order.email && order.email.trim()) recipients.push(order.email.trim());
+
+  await transporter.sendMail({
+    from: smtp.from,
+    to: recipients.join(','),
+    subject: preset.subject,
+    html,
+  });
+}
+
 function escapeHtml(str) {
   return String(str).replace(/[&<>"']/g, (c) => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
@@ -115,4 +165,5 @@ module.exports = {
   notifyAdminOfSpecialRequest,
   notifyAdminOfRegistration,
   notifyUserOfRegistration,
+  notifyOrderStatusEvent,
 };
