@@ -174,6 +174,33 @@
   </div>
 </div>
 
+<!-- ========== 現場收貨確認 ========== -->
+<div class="modal-backdrop" id="receive-modal" style="display:none;">
+  <div class="modal">
+    <h3>現場收貨確認</h3>
+    <p class="sub" id="receive-no">單號 #—</p>
+    <input type="hidden" id="receive-order-id">
+
+    <div class="field" style="margin-top:14px;">
+      <label>收貨結果</label>
+      <div class="radio-group" style="flex-direction:column; gap:8px;">
+        <label class="radio-option"><input type="radio" name="receive-result" value="ok" checked> 無異常，收貨完成（直接結案）</label>
+        <label class="radio-option"><input type="radio" name="receive-result" value="issue"> 有異常，需要採購處理</label>
+      </div>
+    </div>
+
+    <div class="field" id="receive-issue-wrap" style="display:none;">
+      <label>問題描述</label>
+      <textarea id="receive-issue-note" placeholder="例如：A50 管件數量短少 3 支、規格與訂單不符…"></textarea>
+    </div>
+
+    <div class="modal-actions">
+      <button class="btn btn-primary btn-block" id="receive-submit">送出</button>
+      <button class="btn btn-secondary btn-block" id="receive-cancel">取消</button>
+    </div>
+  </div>
+</div>
+
 <script src="js/api.js"></script>
 <script src="js/shop.js"></script>
 </body>
