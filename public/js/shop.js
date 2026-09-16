@@ -442,7 +442,7 @@ function showOrderConfirmation(order) {
 
 // ---------- 歷史紀錄 ----------
 function bindHistorySearch() {
-  document.getElementById('hist-search').addEventListener('click', loadHistory);
+  document.getElementById('hist-search').addEventListener('click', () => loadHistory());
 }
 
 const ORDER_STATUS_LABEL = {
@@ -459,6 +459,10 @@ const ORDER_STATUS_CLASS = {
   issue: 'badge-rejected',
   closed: 'badge-approved',
 };
+const HISTORY_TABS = ['submitted', 'purchasing', 'vendor', 'issue', 'closed'];
+
+let historyOrders = [];      // 目前查詢條件下的全部訂單（搜尋姓名/日期等），頁籤只是在這份資料上再篩選
+let historyActiveTab = 'submitted';
 
 async function loadHistory() {
   const list = document.getElementById('history-list');
@@ -475,24 +479,55 @@ async function loadHistory() {
   if (to) params.set('to', to);
 
   try {
-    const orders = await Api.get(`/api/orders?${params.toString()}`);
-    if (!orders.length) {
-      list.innerHTML = `<div class="empty-state"><div class="icon">📭</div>沒有符合條件的叫料紀錄</div>`;
-      return;
-    }
-    list.innerHTML = orders.map((o) => {
-      const st = o.status || 'submitted';
-      // 廠商處理中時，現場才會看到「確認收貨」的操作
-      const canReceive = st === 'vendor' || st === 'purchasing' || st === 'submitted';
-      return `
-      <div class="ticket">
-        <div class="ticket-head">
+    historyOrders = await Api.get(`/api/orders?${params.toString()}`);
+    renderHistoryTabs();
+    renderHistoryList();
+  } catch (err) {
+    list.innerHTML = `<div class="empty-state"><div class="icon">⚠️</div>${escapeHtml(err.message)}</div>`;
+  }
+}
+
+function renderHistoryTabs() {
+  const wrap = document.getElementById('hist-status-tabs');
+  wrap.className = 'status-tabs';
+  wrap.innerHTML = HISTORY_TABS.map((st) => {
+    const count = historyOrders.filter((o) => (o.status || 'submitted') === st).length;
+    return `<button type="button" class="status-tab${st === historyActiveTab ? ' active' : ''}" data-tab="${st}">${ORDER_STATUS_LABEL[st]}<span class="count">${count}</span></button>`;
+  }).join('');
+
+  wrap.querySelectorAll('.status-tab').forEach((btn) => btn.addEventListener('click', () => {
+    historyActiveTab = btn.dataset.tab;
+    renderHistoryTabs();
+    renderHistoryList();
+  }));
+}
+
+function renderHistoryList() {
+  const list = document.getElementById('history-list');
+  const orders = historyOrders.filter((o) => (o.status || 'submitted') === historyActiveTab);
+
+  if (!orders.length) {
+    list.innerHTML = `<div class="empty-state"><div class="icon">📭</div>這個狀態底下沒有叫料紀錄</div>`;
+    return;
+  }
+
+  list.innerHTML = orders.map((o) => {
+    const st = o.status || 'submitted';
+    const canReceive = st === 'vendor' || st === 'purchasing' || st === 'submitted';
+    const itemCount = o.items.reduce((sum, it) => sum + it.quantity, 0);
+    return `
+    <div class="ticket" data-order-id="${o.id}">
+      <div class="ticket-summary">
+        <div>
           <span class="ticket-no">單號 #${String(o.id).padStart(5, '0')}</span>
-          <span>
-            <span class="badge ${ORDER_STATUS_CLASS[st]}">${ORDER_STATUS_LABEL[st]}</span>
-            <span class="ticket-meta" style="margin-left:8px;">${escapeHtml(o.created_at)}</span>
-          </span>
+          <span class="badge ${ORDER_STATUS_CLASS[st]}" style="margin-left:8px;">${ORDER_STATUS_LABEL[st]}</span>
+          <div class="ticket-row sub" style="margin-top:4px;">
+            ${escapeHtml(o.requester_name)}　${escapeHtml(o.site_name || '-')}　共 ${o.items.length} 項 / ${itemCount} 件　${escapeHtml(o.created_at)}
+          </div>
         </div>
+        <span class="expand-icon">▾</span>
+      </div>
+      <div class="ticket-detail">
         <div class="ticket-row">
           <span class="name">${escapeHtml(o.requester_name)}　<span class="sub">${escapeHtml(o.title)}${o.phone ? ' · ' + escapeHtml(o.phone) : ''}</span></span>
         </div>
@@ -500,7 +535,7 @@ async function loadHistory() {
         ${o.vendor ? `<div class="ticket-row sub">廠商：${escapeHtml(o.vendor)}</div>` : ''}
         ${o.items.map((it) => `
           <div class="ticket-row">
-            <span class="name">${escapeHtml(it.item_name)} ${[it.spec, it.color].filter(Boolean).map((s) => `· ${escapeHtml(s)}`).join(' ')}</span>
+            <span class="name">${it.has_issue ? '⚠️ ' : ''}${escapeHtml(it.item_name)} ${[it.spec, it.color].filter(Boolean).map((s) => `· ${escapeHtml(s)}`).join(' ')}</span>
             <span class="sub">x${it.quantity} ${escapeHtml(it.unit || '')}</span>
           </div>
           ${it.note ? `<div class="ticket-row sub" style="padding-left:12px;">　備註：${escapeHtml(it.note)}</div>` : ''}
@@ -514,27 +549,46 @@ async function loadHistory() {
           <button type="button" class="btn btn-secondary btn-sm print-order-btn" data-id="${o.id}">🖨️ 列印單據</button>
         </div>
       </div>
-    `;
-    }).join('');
+    </div>
+  `;
+  }).join('');
 
-    list.querySelectorAll('.print-order-btn').forEach((btn) => {
-      btn.addEventListener('click', () => window.open(`print-order.html?id=${btn.dataset.id}&mode=vendor`, '_blank'));
+  list.querySelectorAll('.ticket-summary').forEach((el) => el.addEventListener('click', () => {
+    el.closest('.ticket').classList.toggle('expanded');
+  }));
+  list.querySelectorAll('.print-order-btn').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      window.open(`print-order.html?id=${btn.dataset.id}&mode=vendor`, '_blank');
     });
-    list.querySelectorAll('.receive-btn').forEach((btn) => {
-      btn.addEventListener('click', () => openReceiveModal(btn.dataset.id));
+  });
+  list.querySelectorAll('.receive-btn').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      openReceiveModal(btn.dataset.id);
     });
-  } catch (err) {
-    list.innerHTML = `<div class="empty-state"><div class="icon">⚠️</div>${escapeHtml(err.message)}</div>`;
-  }
+  });
 }
 
 // ---------- 現場收貨確認 ----------
 function openReceiveModal(orderId) {
+  const order = historyOrders.find((o) => String(o.id) === String(orderId));
+  if (!order) return;
+
   document.getElementById('receive-order-id').value = orderId;
   document.getElementById('receive-no').textContent = `單號 #${String(orderId).padStart(5, '0')}`;
   document.querySelector('input[name="receive-result"][value="ok"]').checked = true;
   document.getElementById('receive-issue-note').value = '';
   document.getElementById('receive-issue-wrap').style.display = 'none';
+
+  const checksWrap = document.getElementById('receive-item-checks');
+  checksWrap.innerHTML = order.items.map((it) => `
+    <label style="display:flex; align-items:center; gap:8px; padding:5px 0; font-size:13.5px; cursor:pointer;">
+      <input type="checkbox" class="receive-item-check" value="${it.id}" style="width:auto;">
+      ${escapeHtml(it.item_name)} ${[it.spec, it.color].filter(Boolean).map((s) => `· ${escapeHtml(s)}`).join(' ')}（x${it.quantity}）
+    </label>
+  `).join('');
+
   document.getElementById('receive-modal').style.display = 'flex';
 }
 
@@ -554,6 +608,7 @@ function bindReceiveModal() {
     const orderId = document.getElementById('receive-order-id').value;
     const hasIssue = document.querySelector('input[name="receive-result"]:checked').value === 'issue';
     const issueNote = document.getElementById('receive-issue-note').value.trim();
+    const issueItemIds = [...document.querySelectorAll('.receive-item-check:checked')].map((el) => +el.value);
 
     if (hasIssue && !issueNote) return showToast('請填寫異常的問題描述', 'error');
     if (!hasIssue && !confirm('確認收貨無異常，這筆訂單將直接結案，確定嗎？')) return;
@@ -561,7 +616,11 @@ function bindReceiveModal() {
     const btn = document.getElementById('receive-submit');
     btn.disabled = true;
     try {
-      await Api.put(`/api/orders/${orderId}/receive`, { has_issue: hasIssue, issue_note: issueNote });
+      await Api.put(`/api/orders/${orderId}/receive`, {
+        has_issue: hasIssue,
+        issue_note: issueNote,
+        issue_item_ids: issueItemIds,
+      });
       document.getElementById('receive-modal').style.display = 'none';
       showToast(hasIssue ? '已回報異常，將由採購處理' : '收貨完成，訂單已結案', 'success');
       loadHistory();
