@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>管理後台 - 叫料系統</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<div class="toast-stack" id="toast-stack"></div>
+
+<!-- ========== 登入畫面 ========== -->
+<div class="login-screen" id="login-screen">
+  <div class="login-card">
+    <div class="brand-mark" style="width:44px;height:44px;border-radius:12px;font-size:20px;">叫</div>
+    <h2 style="margin-top:14px;">管理後台</h2>
+    <p class="sub" style="color:var(--text-secondary); font-size:13.5px; margin:8px 0 18px;">請輸入管理員密碼以繼續</p>
+    <div class="field" style="text-align:left;">
+      <input type="password" id="login-pw" placeholder="管理員密碼">
+    </div>
+    <button class="btn btn-primary btn-block" id="login-btn">登入</button>
+    <p class="small-note" id="login-error" style="color:var(--danger); min-height:16px;"></p>
+    <a href="index.html" class="small-note" style="display:block; margin-top:10px;">← 回到商城</a>
+  </div>
+</div>
+
+<!-- ========== 後台主畫面 ========== -->
+<div class="admin-shell" id="admin-shell" style="display:none;">
+  <aside class="admin-sidebar">
+    <div class="brand"><span class="brand-mark">叫</span>管理後台</div>
+    <button class="admin-nav-item active" data-panel="items">品項管理</button>
+    <button class="admin-nav-item" data-panel="sites">案場管理</button>
+    <button class="admin-nav-item" data-panel="special">特殊採購審核</button>
+    <button class="admin-nav-item" data-panel="history">叫料歷史紀錄</button>
+    <a href="index.html" class="admin-nav-item" style="text-decoration:none; display:block;">← 回到商城</a>
+    <button class="admin-nav-item admin-logout" id="logout-btn">登出</button>
+  </aside>
+
+  <main class="admin-main">
+
+    <!-- ---- 品項管理 ---- -->
+    <section class="admin-panel active" id="panel-items">
+      <div class="section-title"><div><span class="eyebrow">Catalog</span><h2>分類 / 品項管理</h2></div></div>
+
+      <div class="card" style="margin-bottom:20px;">
+        <h3 style="font-size:14px; margin-bottom:12px;">分類與子分類</h3>
+        <div style="display:flex; gap:10px; margin-bottom:14px; flex-wrap:wrap;">
+          <input type="text" id="new-cat-name" placeholder="新分類名稱" style="flex:1; min-width:160px; padding:8px 10px; border:1px solid var(--border); border-radius:6px; background:var(--surface-sunken);">
+          <button class="btn btn-secondary" id="add-cat-btn">新增分類</button>
+        </div>
+        <div id="cat-tree"></div>
+      </div>
+
+      <div class="card">
+        <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:14px; flex-wrap:wrap; gap:10px;">
+          <h3 style="font-size:14px;">品項清單</h3>
+          <button class="btn btn-primary btn-sm" id="new-item-btn">＋ 新增品項</button>
+        </div>
+        <div style="display:flex; gap:10px; margin-bottom:8px; flex-wrap:wrap;">
+          <select id="filter-cat" style="padding:8px 10px; border:1px solid var(--border); border-radius:6px; background:var(--surface-sunken); min-width:160px;">
+            <option value="">全部分類</option>
+          </select>
+          <select id="filter-subcat" style="padding:8px 10px; border:1px solid var(--border); border-radius:6px; background:var(--surface-sunken); min-width:160px;">
+            <option value="">全部子分類</option>
+          </select>
+        </div>
+        <p class="small-note" style="margin-bottom:14px;">💡 篩選到單一子分類時，品項列可以直接拖曳調整順序。</p>
+        <div style="overflow-x:auto;">
+          <table class="table" id="items-table">
+            <thead><tr><th>圖片</th><th>名稱</th><th>子分類</th><th>規格</th><th>顏色</th><th>狀態</th><th>操作</th></tr></thead>
+            <tbody id="items-tbody"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="card" id="item-form-card" style="margin-top:20px; display:none;">
+        <h3 style="font-size:14px; margin-bottom:14px;" id="item-form-title">新增品項</h3>
+        <form id="item-form">
+          <input type="hidden" id="item-id">
+          <div class="field"><label>品項名稱</label><input type="text" id="item-name" required></div>
+          <div class="field"><label>所屬子分類</label><select id="item-subcat" required></select></div>
+          <div class="field"><label>圖片網址</label><input type="text" id="item-image" placeholder="https://…"></div>
+          <div class="field"><label>說明（選填）</label><input type="text" id="item-desc"></div>
+          <div class="field"><label>單位</label><input type="text" id="item-unit" value="個"></div>
+          <div class="field"><label>規格選項（用逗號分隔，沒有可留空）</label><input type="text" id="item-specs" placeholder="例如：S, M, L"></div>
+          <div class="field"><label>顏色選項（用逗號分隔，沒有可留空）</label><input type="text" id="item-colors" placeholder="例如：黑, 白, 藍"></div>
+          <div class="field"><label>排序（數字越小越前面）</label><input type="number" id="item-sort" value="0"></div>
+          <div class="field"><label><input type="checkbox" id="item-active" checked style="width:auto; margin-right:6px;">上架中（取消勾選 = 從商城下架，但不影響歷史紀錄）</label></div>
+          <div class="modal-actions" style="margin-top:4px;">
+            <button type="submit" class="btn btn-primary">儲存</button>
+            <button type="button" class="btn btn-secondary" id="item-form-cancel">取消</button>
+          </div>
+        </form>
+      </div>
+    </section>
+
+    <!-- ---- 案場管理 ---- -->
+    <section class="admin-panel" id="panel-sites">
+      <div class="section-title"><div><span class="eyebrow">Sites</span><h2>案場管理</h2></div></div>
+      <p class="small-note" style="margin-bottom:14px;">維護案場名稱與送貨地址對照，下單頁面的「案場名稱」下拉選單會從這裡讀取。</p>
+
+      <div class="card" style="margin-bottom:20px;">
+        <h3 style="font-size:14px; margin-bottom:12px;" id="site-form-title">新增案場</h3>
+        <form id="site-form">
+          <input type="hidden" id="site-id">
+          <div class="field"><label>案場名稱</label><input type="text" id="site-name" required></div>
+          <div class="field"><label>送貨地址</label><input type="text" id="site-address"></div>
+          <div class="field"><label>排序（數字越小越前面）</label><input type="number" id="site-sort" value="0"></div>
+          <div class="modal-actions" style="margin-top:4px;">
+            <button type="submit" class="btn btn-primary">儲存</button>
+            <button type="button" class="btn btn-secondary" id="site-form-cancel" style="display:none;">取消編輯</button>
+          </div>
+        </form>
+      </div>
+
+      <div class="card">
+        <h3 style="font-size:14px; margin-bottom:12px;">案場清單</h3>
+        <div style="overflow-x:auto;">
+          <table class="table" id="sites-table">
+            <thead><tr><th>案場名稱</th><th>送貨地址</th><th>排序</th><th>操作</th></tr></thead>
+            <tbody id="sites-tbody"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- ---- 特殊採購審核 ---- -->
+    <section class="admin-panel" id="panel-special">
+      <div class="section-title"><div><span class="eyebrow">Review</span><h2>特殊設備採購審核</h2></div></div>
+      <div class="filter-bar">
+        <div class="field">
+          <label>狀態</label>
+          <select id="sp-filter-status">
+            <option value="">全部</option>
+            <option value="pending" selected>待審核</option>
+            <option value="approved">已核准</option>
+            <option value="rejected">已拒絕</option>
+          </select>
+        </div>
+        <button class="btn btn-primary" id="sp-filter-btn">篩選</button>
+      </div>
+      <div id="admin-special-list"></div>
+    </section>
+
+    <!-- ---- 叫料歷史紀錄 ---- -->
+    <section class="admin-panel" id="panel-history">
+      <div class="section-title"><div><span class="eyebrow">History</span><h2>叫料歷史紀錄</h2></div></div>
+      <div class="filter-bar">
+        <div class="field"><label>姓名</label><input type="text" id="ah-name"></div>
+        <div class="field"><label>職稱</label><input type="text" id="ah-title"></div>
+        <div class="field">
+          <label>訂單狀態</label>
+          <select id="ah-status">
+            <option value="">全部</option>
+            <option value="submitted">送出訂單</option>
+            <option value="purchasing">採購處理中</option>
+            <option value="vendor">廠商處理中</option>
+            <option value="issue">現場回報異常</option>
+            <option value="closed">已結案</option>
+          </select>
+        </div>
+        <div class="field"><label>起始日期</label><input type="date" id="ah-from"></div>
+        <div class="field"><label>結束日期</label><input type="date" id="ah-to"></div>
+        <button class="btn btn-primary" id="ah-search">搜尋</button>
+        <button class="btn btn-secondary" id="ah-export">匯出 CSV</button>
+      </div>
+      <div id="admin-history-list"></div>
+    </section>
+
+  </main>
+</div>
+
+<script src="js/api.js"></script>
+<script src="js/admin.js"></script>
+</body>
+</html>
