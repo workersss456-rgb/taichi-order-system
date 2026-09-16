@@ -1,7 +1,6 @@
 const express = require('express');
 const { pool } = require('../db');
 const requireAdmin = require('../middleware/adminAuth');
-const { notifyOrderStatusEvent } = require('../mailer');
 
 const router = express.Router();
 
@@ -160,33 +159,6 @@ router.delete('/items/:id', async (req, res) => {
   }
 });
 
-// ---------- 批次排序（拖曳排序用） ----------
-// 傳入 { type: 'categories' | 'subcategories' | 'items', ids: [依畫面上新順序排列的 id] }
-// 依陣列順序把 sort_order 重新編號成 1, 2, 3…，使用者就不用自己記數字。
-router.put('/reorder', async (req, res) => {
-  const { type, ids } = req.body;
-  const allowed = { categories: 'categories', subcategories: 'subcategories', items: 'items', sites: 'sites' };
-  const table = allowed[type];
-  if (!table) return res.status(400).json({ error: '排序對象不正確' });
-  if (!Array.isArray(ids) || !ids.length) return res.status(400).json({ error: '沒有收到排序資料' });
-
-  const client = await pool.connect();
-  try {
-    await client.query('BEGIN');
-    for (let i = 0; i < ids.length; i++) {
-      await client.query(`UPDATE ${table} SET sort_order = $1 WHERE id = $2`, [i + 1, ids[i]]);
-    }
-    await client.query('COMMIT');
-    res.json({ ok: true });
-  } catch (err) {
-    await client.query('ROLLBACK');
-    console.error(err);
-    res.status(500).json({ error: '排序儲存失敗' });
-  } finally {
-    client.release();
-  }
-});
-
 // ---------- 案場管理（名稱 + 送貨地址對照） ----------
 router.get('/sites', async (req, res) => {
   try {
@@ -256,89 +228,6 @@ router.put('/orders/:id/vendor', async (req, res) => {
   }
 });
 
-// ---------- 訂單狀態流程 ----------
-// submitted 送出訂單 → purchasing 採購處理中 → vendor 廠商處理中
-//   → closed 已結案（現場收貨無異常）
-//   或 issue 現場回報異常 → 採購回報處理內容 → closed 已結案
-const ORDER_STATUSES = ['submitted', 'purchasing', 'vendor', 'issue', 'closed'];
-
-router.put('/orders/:id/status', async (req, res) => {
-  try {
-    const { status } = req.body;
-    if (!ORDER_STATUSES.includes(status)) return res.status(400).json({ error: '狀態不正確' });
-
-    // 結案時記錄結案時間
-    const closedSql = status === 'closed' ? ', closed_at = NOW()' : '';
-    const row = (await pool.query(
-      `UPDATE orders SET status = $1${closedSql} WHERE id = $2
-       RETURNING *, TO_CHAR(need_date, 'YYYY-MM-DD') AS need_date_fmt`,
-      [status, req.params.id]
-    )).rows[0];
-    if (!row) return res.status(404).json({ error: '找不到這筆叫料單' });
-    row.need_date = row.need_date_fmt; delete row.need_date_fmt;
-
-    if (status === 'closed') {
-      notifyOrderStatusEvent({ order: row, eventType: 'closed', extra: row.purchase_reply })
-        .catch((err) => console.error('結案通知失敗：', err.message));
-    }
-    res.json(row);
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: '更新訂單狀態失敗' });
-  }
-});
-
-// 採購針對現場回報的異常，填寫處理內容（填完可再按結案）
-router.put('/orders/:id/purchase-reply', async (req, res) => {
-  try {
-    const { purchase_reply } = req.body;
-    const row = (await pool.query(
-      'UPDATE orders SET purchase_reply = $1 WHERE id = $2 RETURNING *',
-      [purchase_reply || '', req.params.id]
-    )).rows[0];
-    if (!row) return res.status(404).json({ error: '找不到這筆叫料單' });
-    res.json(row);
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: '儲存處理內容失敗' });
-  }
-});
-
-// ---------- 廠商報價（採購填寫，單價 = 牌價 × 折數） ----------
-router.put('/orders/:id/pricing', async (req, res) => {
-  const { items } = req.body;
-  if (!Array.isArray(items)) return res.status(400).json({ error: '沒有收到報價資料' });
-
-  const client = await pool.connect();
-  try {
-    await client.query('BEGIN');
-    for (const it of items) {
-      const list = it.list_price === '' || it.list_price === null || it.list_price === undefined
-        ? null : Number(it.list_price);
-      const disc = it.discount === '' || it.discount === null || it.discount === undefined
-        ? null : Number(it.discount);
-      // 單價由後端算，避免前端算的跟存的不一致
-      const unit = (list !== null && disc !== null) ? Math.round(list * disc * 100) / 100 : null;
-      await client.query(
-        'UPDATE order_items SET list_price = $1, discount = $2, unit_price = $3 WHERE id = $4 AND order_id = $5',
-        [list, disc, unit, it.id, req.params.id]
-      );
-    }
-    await client.query('COMMIT');
-
-    const rows = (await pool.query(
-      'SELECT * FROM order_items WHERE order_id = $1 ORDER BY id', [req.params.id]
-    )).rows;
-    res.json({ ok: true, items: rows });
-  } catch (err) {
-    await client.query('ROLLBACK');
-    console.error(err);
-    res.status(500).json({ error: '儲存報價失敗' });
-  } finally {
-    client.release();
-  }
-});
-
 // ---------- 特殊設備採購審核 ----------
 router.put('/special-requests/:id', async (req, res) => {
   try {
@@ -371,19 +260,13 @@ router.get('/orders/export.csv', async (req, res) => {
        FROM orders ORDER BY id DESC`
     )).rows;
 
-    const rows = [['單號', '狀態', '申請人', '職稱', '聯絡手機', '需求日', '案場名稱', '送貨地址', '施工用途', '類別', '廠商', '時間', '品項', '規格', '顏色', '數量', '單位', '牌價', '折數', '單價', '小計', '品項備註', '訂單備註', '異常說明', '採購處理內容']];
-    const STATUS_TEXT = { submitted: '送出訂單', purchasing: '採購處理中', vendor: '廠商處理中', issue: '現場回報異常', closed: '已結案' };
+    const rows = [['單號', '申請人', '職稱', '聯絡手機', '需求日', '案場名稱', '送貨地址', '施工用途', '類別', '廠商', '時間', '品項', '規格', '顏色', '數量', '單位', '品項備註', '訂單備註']];
     for (const o of orders) {
       const items = (await pool.query('SELECT * FROM order_items WHERE order_id = $1', [o.id])).rows;
       for (const it of items) {
-        const sub = (it.unit_price === null || it.unit_price === undefined)
-          ? '' : (Number(it.unit_price) * it.quantity).toFixed(2);
         rows.push([
-          o.id, STATUS_TEXT[o.status || 'submitted'] || o.status,
-          o.requester_name, o.title, o.phone, o.need_date_fmt, o.site_name, o.site_address, o.purpose, o.delivery_type, o.vendor,
-          o.created_at_fmt, it.item_name, it.spec, it.color, it.quantity, it.unit,
-          it.list_price ?? '', it.discount ?? '', it.unit_price ?? '', sub,
-          it.note, o.note, o.issue_note, o.purchase_reply,
+          o.id, o.requester_name, o.title, o.phone, o.need_date_fmt, o.site_name, o.site_address, o.purpose, o.delivery_type, o.vendor,
+          o.created_at_fmt, it.item_name, it.spec, it.color, it.quantity, it.unit, it.note, o.note,
         ]);
       }
     }

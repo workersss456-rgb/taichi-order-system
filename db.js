@@ -57,11 +57,6 @@ async function createTables() {
       purpose TEXT,
       delivery_type TEXT,
       vendor TEXT,
-      status TEXT DEFAULT 'submitted',
-      issue_note TEXT,
-      purchase_reply TEXT,
-      received_at TIMESTAMPTZ,
-      closed_at TIMESTAMPTZ,
       created_at TIMESTAMPTZ DEFAULT NOW()
     );
 
@@ -75,11 +70,7 @@ async function createTables() {
       color TEXT,
       quantity INTEGER NOT NULL,
       unit TEXT,
-      note TEXT,
-      list_price NUMERIC(12,2),
-      discount NUMERIC(6,4),
-      unit_price NUMERIC(12,2),
-      has_issue BOOLEAN DEFAULT false
+      note TEXT
     );
 
     CREATE TABLE IF NOT EXISTS sites (
@@ -128,21 +119,6 @@ async function createTables() {
     ALTER TABLE orders ADD COLUMN IF NOT EXISTS delivery_type TEXT;
     ALTER TABLE orders ADD COLUMN IF NOT EXISTS vendor TEXT;
     ALTER TABLE order_items ADD COLUMN IF NOT EXISTS note TEXT;
-
-    -- 訂單狀態流程
-    -- submitted 送出訂單 / purchasing 採購處理中 / vendor 廠商處理中
-    -- issue 現場回報異常（待採購處理） / closed 已結案
-    ALTER TABLE orders ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'submitted';
-    ALTER TABLE orders ADD COLUMN IF NOT EXISTS issue_note TEXT;
-    ALTER TABLE orders ADD COLUMN IF NOT EXISTS purchase_reply TEXT;
-    ALTER TABLE orders ADD COLUMN IF NOT EXISTS received_at TIMESTAMPTZ;
-    ALTER TABLE orders ADD COLUMN IF NOT EXISTS closed_at TIMESTAMPTZ;
-
-    -- 廠商報價（採購在後台填寫，單價 = 牌價 × 折數）
-    ALTER TABLE order_items ADD COLUMN IF NOT EXISTS list_price NUMERIC(12,2);
-    ALTER TABLE order_items ADD COLUMN IF NOT EXISTS discount NUMERIC(6,4);
-    ALTER TABLE order_items ADD COLUMN IF NOT EXISTS unit_price NUMERIC(12,2);
-    ALTER TABLE order_items ADD COLUMN IF NOT EXISTS has_issue BOOLEAN DEFAULT false;
   `);
 }
 

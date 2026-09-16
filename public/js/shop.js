@@ -12,7 +12,6 @@ document.addEventListener('DOMContentLoaded', async () => {
   bindSpecialForm();
   bindHistorySearch();
   bindSpecialSearch();
-  bindReceiveModal();
   loadSites();
 
   try {
@@ -159,37 +158,25 @@ function renderCatalog() {
     return;
   }
 
-  nav.innerHTML = `<button class="cat-nav-item active" data-cat="all">全部商品</button>` +
-    catalog.map((cat) =>
-      `<button class="cat-nav-item" data-cat="${cat.id}">${escapeHtml(cat.name)}</button>`
-    ).join('');
+  nav.innerHTML = catalog.map((cat, i) =>
+    `<button class="cat-nav-item${i === 0 ? ' active' : ''}" data-cat="cat-${cat.id}">${escapeHtml(cat.name)}</button>`
+  ).join('');
 
   nav.querySelectorAll('.cat-nav-item').forEach((btn) => {
     btn.addEventListener('click', () => {
       nav.querySelectorAll('.cat-nav-item').forEach((b) => b.classList.remove('active'));
       btn.classList.add('active');
-      renderItemsForCategory(btn.dataset.cat);
+      document.getElementById(btn.dataset.cat)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
     });
   });
 
-  renderItemsForCategory('all');
-}
+  container.innerHTML = catalog.map((cat) => `
+    <div id="cat-${cat.id}">
+      ${cat.subcategories.map((sub) => renderSubcatSection(cat, sub)).join('') || ''}
+    </div>
+  `).join('');
 
-// 依選取的分類顯示品項；'all' 代表全部商品
-function renderItemsForCategory(catKey) {
-  const container = document.getElementById('subcats-container');
-  const cats = catKey === 'all'
-    ? catalog
-    : catalog.filter((c) => String(c.id) === String(catKey));
-
-  const html = cats
-    .map((cat) => cat.subcategories.map((sub) => renderSubcatSection(cat, sub)).join(''))
-    .join('');
-
-  container.innerHTML = html ||
-    `<div class="empty-state"><div class="icon">📦</div>這個分類底下還沒有上架的品項</div>`;
   container.querySelectorAll('.item-card').forEach(bindItemCard);
-  window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
 function renderSubcatSection(cat, sub) {
@@ -436,33 +423,14 @@ function showOrderConfirmation(order) {
   `).join('');
   document.getElementById('confirm-modal').style.display = 'flex';
   document.getElementById('confirm-print').onclick = () => {
-    window.open(`print-order.html?id=${order.id}&mode=vendor`, '_blank');
+    window.open(`print-order.html?id=${order.id}`, '_blank');
   };
 }
 
 // ---------- 歷史紀錄 ----------
 function bindHistorySearch() {
-  document.getElementById('hist-search').addEventListener('click', () => loadHistory());
+  document.getElementById('hist-search').addEventListener('click', loadHistory);
 }
-
-const ORDER_STATUS_LABEL = {
-  submitted: '送出訂單',
-  purchasing: '採購處理中',
-  vendor: '廠商處理中',
-  issue: '現場回報異常',
-  closed: '已結案',
-};
-const ORDER_STATUS_CLASS = {
-  submitted: 'badge-pending',
-  purchasing: 'badge-pending',
-  vendor: 'badge-pending',
-  issue: 'badge-rejected',
-  closed: 'badge-approved',
-};
-const HISTORY_TABS = ['submitted', 'purchasing', 'vendor', 'issue', 'closed'];
-
-let historyOrders = [];      // 目前查詢條件下的全部訂單（搜尋姓名/日期等），頁籤只是在這份資料上再篩選
-let historyActiveTab = 'submitted';
 
 async function loadHistory() {
   const list = document.getElementById('history-list');
@@ -479,159 +447,43 @@ async function loadHistory() {
   if (to) params.set('to', to);
 
   try {
-    historyOrders = await Api.get(`/api/orders?${params.toString()}`);
-    renderHistoryTabs();
-    renderHistoryList();
+    const orders = await Api.get(`/api/orders?${params.toString()}`);
+    if (!orders.length) {
+      list.innerHTML = `<div class="empty-state"><div class="icon">📭</div>沒有符合條件的叫料紀錄</div>`;
+      return;
+    }
+    list.innerHTML = orders.map((o) => `
+      <div class="ticket">
+        <div class="ticket-head">
+          <span class="ticket-no">單號 #${String(o.id).padStart(5, '0')}</span>
+          <span class="ticket-meta">${escapeHtml(o.created_at)}</span>
+        </div>
+        <div class="ticket-row">
+          <span class="name">${escapeHtml(o.requester_name)}　<span class="sub">${escapeHtml(o.title)}${o.phone ? ' · ' + escapeHtml(o.phone) : ''}</span></span>
+        </div>
+        <div class="ticket-row sub">案場：${escapeHtml(o.site_name || '-')}　需求日：${escapeHtml(o.need_date || '-')}　類別：${escapeHtml(o.delivery_type || '-')}</div>
+        ${o.items.map((it) => `
+          <div class="ticket-row">
+            <span class="name">${escapeHtml(it.item_name)} ${[it.spec, it.color].filter(Boolean).map((s) => `· ${escapeHtml(s)}`).join(' ')}</span>
+            <span class="sub">x${it.quantity} ${escapeHtml(it.unit || '')}</span>
+          </div>
+        `).join('')}
+        ${o.note ? `<div class="ticket-row sub" style="margin-top:6px;">備註：${escapeHtml(o.note)}</div>` : ''}
+        <div class="ticket-row" style="margin-top:10px;">
+          <button type="button" class="btn btn-secondary btn-sm print-order-btn" data-id="${o.id}">列印單據</button>
+        </div>
+      </div>
+    `).join('');
+
+    list.querySelectorAll('.print-order-btn').forEach((btn) => {
+      btn.addEventListener('click', () => window.open(`print-order.html?id=${btn.dataset.id}`, '_blank'));
+    });
   } catch (err) {
     list.innerHTML = `<div class="empty-state"><div class="icon">⚠️</div>${escapeHtml(err.message)}</div>`;
   }
 }
 
-function renderHistoryTabs() {
-  const wrap = document.getElementById('hist-status-tabs');
-  wrap.className = 'status-tabs';
-  wrap.innerHTML = HISTORY_TABS.map((st) => {
-    const count = historyOrders.filter((o) => (o.status || 'submitted') === st).length;
-    return `<button type="button" class="status-tab${st === historyActiveTab ? ' active' : ''}" data-tab="${st}">${ORDER_STATUS_LABEL[st]}<span class="count">${count}</span></button>`;
-  }).join('');
-
-  wrap.querySelectorAll('.status-tab').forEach((btn) => btn.addEventListener('click', () => {
-    historyActiveTab = btn.dataset.tab;
-    renderHistoryTabs();
-    renderHistoryList();
-  }));
-}
-
-function renderHistoryList() {
-  const list = document.getElementById('history-list');
-  const orders = historyOrders.filter((o) => (o.status || 'submitted') === historyActiveTab);
-
-  if (!orders.length) {
-    list.innerHTML = `<div class="empty-state"><div class="icon">📭</div>這個狀態底下沒有叫料紀錄</div>`;
-    return;
-  }
-
-  list.innerHTML = orders.map((o) => {
-    const st = o.status || 'submitted';
-    const canReceive = st === 'vendor' || st === 'purchasing' || st === 'submitted';
-    const itemCount = o.items.reduce((sum, it) => sum + it.quantity, 0);
-    return `
-    <div class="ticket" data-order-id="${o.id}">
-      <div class="ticket-summary">
-        <div>
-          <span class="ticket-no">單號 #${String(o.id).padStart(5, '0')}</span>
-          <span class="badge ${ORDER_STATUS_CLASS[st]}" style="margin-left:8px;">${ORDER_STATUS_LABEL[st]}</span>
-          <div class="ticket-row sub" style="margin-top:4px;">
-            ${escapeHtml(o.requester_name)}　${escapeHtml(o.site_name || '-')}　共 ${o.items.length} 項 / ${itemCount} 件　${escapeHtml(o.created_at)}
-          </div>
-        </div>
-        <span class="expand-icon">▾</span>
-      </div>
-      <div class="ticket-detail">
-        <div class="ticket-row">
-          <span class="name">${escapeHtml(o.requester_name)}　<span class="sub">${escapeHtml(o.title)}${o.phone ? ' · ' + escapeHtml(o.phone) : ''}</span></span>
-        </div>
-        <div class="ticket-row sub">案場：${escapeHtml(o.site_name || '-')}　需求日：${escapeHtml(o.need_date || '-')}　類別：${escapeHtml(o.delivery_type || '-')}</div>
-        ${o.vendor ? `<div class="ticket-row sub">廠商：${escapeHtml(o.vendor)}</div>` : ''}
-        ${o.items.map((it) => `
-          <div class="ticket-row">
-            <span class="name">${it.has_issue ? '⚠️ ' : ''}${escapeHtml(it.item_name)} ${[it.spec, it.color].filter(Boolean).map((s) => `· ${escapeHtml(s)}`).join(' ')}</span>
-            <span class="sub">x${it.quantity} ${escapeHtml(it.unit || '')}</span>
-          </div>
-          ${it.note ? `<div class="ticket-row sub" style="padding-left:12px;">　備註：${escapeHtml(it.note)}</div>` : ''}
-        `).join('')}
-        ${o.note ? `<div class="ticket-row sub" style="margin-top:6px;">備註：${escapeHtml(o.note)}</div>` : ''}
-        ${o.issue_note ? `<div class="ticket-row sub" style="margin-top:6px; color:var(--danger);">⚠️ 已回報異常：${escapeHtml(o.issue_note)}</div>` : ''}
-        ${o.purchase_reply ? `<div class="ticket-row sub" style="margin-top:4px;">採購處理內容：${escapeHtml(o.purchase_reply)}</div>` : ''}
-
-        <div class="ticket-row" style="margin-top:10px; gap:8px; flex-wrap:wrap;">
-          ${canReceive ? `<button type="button" class="btn btn-primary btn-sm receive-btn" data-id="${o.id}">📦 現場收貨確認</button>` : ''}
-          <button type="button" class="btn btn-secondary btn-sm print-order-btn" data-id="${o.id}">🖨️ 列印單據</button>
-        </div>
-      </div>
-    </div>
-  `;
-  }).join('');
-
-  list.querySelectorAll('.ticket-summary').forEach((el) => el.addEventListener('click', () => {
-    el.closest('.ticket').classList.toggle('expanded');
-  }));
-  list.querySelectorAll('.print-order-btn').forEach((btn) => {
-    btn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      window.open(`print-order.html?id=${btn.dataset.id}&mode=vendor`, '_blank');
-    });
-  });
-  list.querySelectorAll('.receive-btn').forEach((btn) => {
-    btn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      openReceiveModal(btn.dataset.id);
-    });
-  });
-}
-
-// ---------- 現場收貨確認 ----------
-function openReceiveModal(orderId) {
-  const order = historyOrders.find((o) => String(o.id) === String(orderId));
-  if (!order) return;
-
-  document.getElementById('receive-order-id').value = orderId;
-  document.getElementById('receive-no').textContent = `單號 #${String(orderId).padStart(5, '0')}`;
-  document.querySelector('input[name="receive-result"][value="ok"]').checked = true;
-  document.getElementById('receive-issue-note').value = '';
-  document.getElementById('receive-issue-wrap').style.display = 'none';
-
-  const checksWrap = document.getElementById('receive-item-checks');
-  checksWrap.innerHTML = order.items.map((it) => `
-    <label style="display:flex; align-items:center; gap:8px; padding:5px 0; font-size:13.5px; cursor:pointer;">
-      <input type="checkbox" class="receive-item-check" value="${it.id}" style="width:auto;">
-      ${escapeHtml(it.item_name)} ${[it.spec, it.color].filter(Boolean).map((s) => `· ${escapeHtml(s)}`).join(' ')}（x${it.quantity}）
-    </label>
-  `).join('');
-
-  document.getElementById('receive-modal').style.display = 'flex';
-}
-
-function bindReceiveModal() {
-  document.querySelectorAll('input[name="receive-result"]').forEach((radio) => {
-    radio.addEventListener('change', () => {
-      document.getElementById('receive-issue-wrap').style.display =
-        document.querySelector('input[name="receive-result"]:checked').value === 'issue' ? 'block' : 'none';
-    });
-  });
-
-  document.getElementById('receive-cancel').addEventListener('click', () => {
-    document.getElementById('receive-modal').style.display = 'none';
-  });
-
-  document.getElementById('receive-submit').addEventListener('click', async () => {
-    const orderId = document.getElementById('receive-order-id').value;
-    const hasIssue = document.querySelector('input[name="receive-result"]:checked').value === 'issue';
-    const issueNote = document.getElementById('receive-issue-note').value.trim();
-    const issueItemIds = [...document.querySelectorAll('.receive-item-check:checked')].map((el) => +el.value);
-
-    if (hasIssue && !issueNote) return showToast('請填寫異常的問題描述', 'error');
-    if (!hasIssue && !confirm('確認收貨無異常，這筆訂單將直接結案，確定嗎？')) return;
-
-    const btn = document.getElementById('receive-submit');
-    btn.disabled = true;
-    try {
-      await Api.put(`/api/orders/${orderId}/receive`, {
-        has_issue: hasIssue,
-        issue_note: issueNote,
-        issue_item_ids: issueItemIds,
-      });
-      document.getElementById('receive-modal').style.display = 'none';
-      showToast(hasIssue ? '已回報異常，將由採購處理' : '收貨完成，訂單已結案', 'success');
-      loadHistory();
-    } catch (err) {
-      showToast(err.message, 'error');
-    } finally {
-      btn.disabled = false;
-    }
-  });
-}
-
+// ---------- 特殊設備採購 ----------
 function bindSpecialForm() {
   document.getElementById('special-form').addEventListener('submit', async (e) => {
     e.preventDefault();

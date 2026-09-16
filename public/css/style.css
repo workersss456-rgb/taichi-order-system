@@ -348,40 +348,6 @@ a { color: var(--primary); }
 .radio-option { display: flex; align-items: center; gap: 6px; font-size: 14px; font-weight: 500; color: var(--text); cursor: pointer; }
 .radio-option input[type="radio"] { width: auto; }
 
-/* ---------- 拖曳排序 ---------- */
-.draggable-row { cursor: grab; }
-.draggable-row:active { cursor: grabbing; }
-.draggable-row.dragging { opacity: 0.4; outline: 2px dashed var(--primary); }
-.drag-handle {
-  display: inline-block;
-  color: var(--text-secondary);
-  margin-right: 8px;
-  letter-spacing: -2px;
-  user-select: none;
-}
-
-/* ---------- 歷史紀錄狀態頁籤 ---------- */
-.status-tabs { display: flex; gap: 6px; flex-wrap: wrap; }
-.status-tab {
-  border: 1px solid var(--border);
-  background: var(--surface);
-  padding: 7px 14px;
-  border-radius: 999px;
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--text-secondary);
-  cursor: pointer;
-}
-.status-tab.active { background: var(--primary); border-color: var(--primary); color: #fff; }
-.status-tab .count { opacity: 0.75; margin-left: 3px; }
-
-/* ---------- 歷史紀錄可摺疊卡片 ---------- */
-.ticket-summary { display: flex; align-items: center; justify-content: space-between; cursor: pointer; gap: 10px; }
-.ticket-summary .expand-icon { transition: transform 0.15s; color: var(--text-secondary); flex-shrink: 0; }
-.ticket.expanded .expand-icon { transform: rotate(180deg); }
-.ticket-detail { display: none; margin-top: 10px; }
-.ticket.expanded .ticket-detail { display: block; }
-
 .cart-line-note {
   width: 100%;
   margin-top: 6px;
@@ -488,8 +454,6 @@ a { color: var(--primary); }
   background: var(--surface);
   border-radius: var(--radius-lg);
   max-width: 440px; width: 100%;
-  max-height: calc(100vh - 40px);
-  overflow-y: auto;
   padding: 26px;
   box-shadow: var(--shadow-lg);
 }
@@ -517,20 +481,13 @@ a { color: var(--primary); }
 }
 .admin-nav-item.active { background: rgba(255,255,255,.12); color: #fff; }
 .admin-nav-item:hover:not(.active) { color: #fff; }
-.admin-main { padding: 28px 40px; max-width: 1600px; }
+.admin-main { padding: 28px 32px; max-width: 1100px; }
 .admin-logout { margin-top: auto; }
 
-.table { width: 100%; border-collapse: collapse; background: var(--surface); border-radius: var(--radius); overflow: hidden; border: 1px solid var(--border); table-layout: fixed; }
-.table th, .table td { text-align: left; padding: 12px 16px; font-size: 13.5px; border-bottom: 1px solid var(--border); word-break: break-word; }
+.table { width: 100%; border-collapse: collapse; background: var(--surface); border-radius: var(--radius); overflow: hidden; border: 1px solid var(--border); }
+.table th, .table td { text-align: left; padding: 10px 12px; font-size: 13.5px; border-bottom: 1px solid var(--border); }
 .table th { background: var(--surface-sunken); color: var(--text-secondary); font-weight: 700; font-size: 12px; text-transform: uppercase; letter-spacing: .03em; }
 .table tr:last-child td { border-bottom: none; }
-#items-table th:nth-child(1), #items-table td:nth-child(1) { width: 90px; }
-#items-table th:nth-child(2) { width: 20%; }
-#items-table th:nth-child(3) { width: 16%; }
-#items-table th:nth-child(4) { width: 18%; }
-#items-table th:nth-child(5) { width: 14%; }
-#items-table th:nth-child(6) { width: 10%; }
-#items-table th:nth-child(7) { width: 160px; }
 .table td.actions { display: flex; gap: 6px; }
 
 .login-screen {
@@ -555,16 +512,4 @@ a { color: var(--primary); }
   .admin-sidebar .brand { display: none; }
   .admin-main { padding: 18px; }
   .profile-badge { max-width: 140px; }
-
-  /* 手機固定一列 2 欄，卡片內容跟著縮小才塞得下 */
-  .item-grid { grid-template-columns: 1fr 1fr; gap: 8px; }
-  .item-img { height: 90px; }
-  .item-body { padding: 8px 9px 10px; gap: 5px; }
-  .item-name { font-size: 12.5px; line-height: 1.3; }
-  .item-desc { display: none; } /* 手機版空間有限，說明文字先隱藏，卡片仍可點進去看細節 */
-  .item-controls { gap: 4px; }
-  .item-controls select { font-size: 12px; padding: 5px 6px; }
-  .qty-stepper button { width: 26px; height: 26px; font-size: 14px; }
-  .qty-stepper input { width: 30px; font-size: 12.5px; }
-  .item-controls .btn { font-size: 12px; padding: 7px 6px; }
 }

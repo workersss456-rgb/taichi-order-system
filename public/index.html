@@ -57,7 +57,6 @@
       <div class="field"><label>結束日期</label><input type="date" id="hist-to"></div>
       <button class="btn btn-primary" id="hist-search">搜尋</button>
     </div>
-    <div class="nav-tabs" id="hist-status-tabs" style="margin-bottom:16px;"></div>
     <div id="history-list"></div>
   </section>
 
@@ -171,35 +170,6 @@
 
     <div class="modal-actions">
       <button class="btn btn-secondary btn-block" id="profile-modal-close">關閉</button>
-    </div>
-  </div>
-</div>
-
-<!-- ========== 現場收貨確認 ========== -->
-<div class="modal-backdrop" id="receive-modal" style="display:none;">
-  <div class="modal">
-    <h3>現場收貨確認</h3>
-    <p class="sub" id="receive-no">單號 #—</p>
-    <input type="hidden" id="receive-order-id">
-
-    <div class="field" style="margin-top:14px;">
-      <label>收貨結果</label>
-      <div class="radio-group" style="flex-direction:column; gap:8px;">
-        <label class="radio-option"><input type="radio" name="receive-result" value="ok" checked> 無異常，收貨完成（直接結案）</label>
-        <label class="radio-option"><input type="radio" name="receive-result" value="issue"> 有異常，需要採購處理</label>
-      </div>
-    </div>
-
-    <div class="field" id="receive-issue-wrap" style="display:none;">
-      <label>哪些項目有問題？（可複選，沒勾就當作整張單都有狀況）</label>
-      <div id="receive-item-checks" style="border:1px solid var(--border); border-radius:8px; padding:8px 10px; max-height:160px; overflow-y:auto; margin-bottom:10px;"></div>
-      <label>問題描述</label>
-      <textarea id="receive-issue-note" placeholder="例如：A50 管件數量短少 3 支、規格與訂單不符…"></textarea>
-    </div>
-
-    <div class="modal-actions">
-      <button class="btn btn-primary btn-block" id="receive-submit">送出</button>
-      <button class="btn btn-secondary btn-block" id="receive-cancel">取消</button>
     </div>
   </div>
 </div>

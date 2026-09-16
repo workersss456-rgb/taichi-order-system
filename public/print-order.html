@@ -6,13 +6,6 @@
 <title>列印訂購單</title>
 <link rel="stylesheet" href="css/style.css">
 <style>
-  /* ---------- 太綺水電 品牌色彩 ---------- */
-  :root {
-    --brand-navy: #1D2C6F;
-    --brand-gold: #F4B223;
-    --brand-gray: #9b9b9b;
-  }
-
   /* ---------- 列印單據專用樣式 ---------- */
   body { background: #e9e9e9; }
   .print-toolbar {
@@ -25,63 +18,45 @@
     background: #fff;
     padding: 1.5cm 1.2cm;
     box-shadow: 0 2px 10px rgba(0,0,0,0.15);
-    font-family: "Microsoft JhengHei", "微軟正黑體", "PingFang TC", "Noto Sans TC", sans-serif;
+    font-family: "DFKai-SB", "BiauKai", "標楷體", "Microsoft JhengHei", "PMingLiU", serif;
     color: #000;
   }
-  .doc-header {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 16px;
-    border-bottom: 3px solid var(--brand-gold);
-    padding-bottom: 10px;
+  .doc-title {
+    text-align: center;
+    font-size: 14pt;
+    font-weight: 700;
     margin-bottom: 14px;
   }
-  .doc-header img { height: 2.3cm; }
-  .doc-title { text-align: center; font-size: 14pt; font-weight: 700; color: var(--brand-navy); }
-  .doc-title .sub-line { font-size: 10pt; font-weight: 400; margin-top: 4px; color: #000; }
-
-  table.info-table, table.item-table, table.footer-table {
+  table.info-table, table.item-table {
     width: 100%;
     border-collapse: collapse;
     font-size: 12pt;
   }
   table.info-table th, table.info-table td,
-  table.item-table th, table.item-table td,
-  table.footer-table td {
-    border: 1px solid var(--brand-navy);
+  table.item-table th, table.item-table td {
+    border: 1px solid #000;
     padding: 5px 8px;
   }
-  table.info-table th { font-weight: 700; background: #eef0f8; color: var(--brand-navy); text-align: left; white-space: nowrap; }
+  table.info-table th { font-weight: 700; background: #f4f4f4; text-align: left; white-space: nowrap; }
   table.info-table td { min-width: 60px; }
   table.info-table { margin-bottom: 16px; }
 
   table.item-table thead tr.repeat-title th {
-    font-weight: 700; font-size: 13pt; text-align: center; background: #fff; border: none; color: var(--brand-navy);
+    font-weight: 700; font-size: 13pt; text-align: center; background: #fff; border: none;
     padding: 6px 0 10px;
   }
-  table.item-table thead tr.repeat-title img { height: 1.5cm; vertical-align: middle; margin-right: 10px; }
-  table.item-table thead tr.col-head th { font-weight: 700; text-align: center; background: #eef0f8; color: var(--brand-navy); }
+  table.item-table thead tr.col-head th { font-weight: 700; text-align: center; background: #f4f4f4; }
   table.item-table .col-no { width: 8%; text-align: center; }
   table.item-table .col-qty { width: 10%; text-align: center; }
   table.item-table .col-unit { width: 10%; text-align: center; }
   table.item-table td.cell-no, table.item-table td.cell-qty, table.item-table td.cell-unit { text-align: center; }
-  table.item-table .col-money { width: 9%; }
-  table.item-table td.cell-money { text-align: right; white-space: nowrap; }
-  /* 內部核簽單欄位較多，字級略縮以免擠爆 */
-  .print-page.with-price table.item-table { font-size: 10.5pt; }
-  .print-page.with-price table.item-table th,
-  .print-page.with-price table.item-table td { padding: 4px 5px; }
   table.item-table tbody tr, table.item-table thead tr { break-inside: avoid; }
 
-  /* 備註＋簽核：獨立於品項表格之外的區塊，這樣只會在整份文件結束的地方出現一次，
-     不會像 tfoot 一樣被瀏覽器在每一頁都重複印出來 */
-  table.footer-table { margin-top: -1px; break-inside: avoid; }
   .remark-cell { text-align: left; vertical-align: top; min-height: 2cm; padding: 8px !important; }
   .sign-row { display: flex; }
-  .sign-box { flex: 1; border-right: 1px solid var(--brand-navy); text-align: center; }
+  .sign-box { flex: 1; border-right: 1px solid #000; text-align: center; }
   .sign-box:last-child { border-right: none; }
-  .sign-label { font-weight: 700; padding: 6px 0; border-bottom: 1px solid var(--brand-navy); color: var(--brand-navy); background: #f7f3e8; }
+  .sign-label { font-weight: 700; padding: 6px 0; border-bottom: 1px solid #000; }
   .sign-space { height: 2.5cm; }
 
   @media print {
