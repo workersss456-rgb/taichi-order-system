@@ -12,6 +12,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   bindSpecialForm();
   bindHistorySearch();
   bindSpecialSearch();
+  bindReceiveModal();
   loadSites();
 
   try {
@@ -158,25 +159,37 @@ function renderCatalog() {
     return;
   }
 
-  nav.innerHTML = catalog.map((cat, i) =>
-    `<button class="cat-nav-item${i === 0 ? ' active' : ''}" data-cat="cat-${cat.id}">${escapeHtml(cat.name)}</button>`
-  ).join('');
+  nav.innerHTML = `<button class="cat-nav-item active" data-cat="all">全部商品</button>` +
+    catalog.map((cat) =>
+      `<button class="cat-nav-item" data-cat="${cat.id}">${escapeHtml(cat.name)}</button>`
+    ).join('');
 
   nav.querySelectorAll('.cat-nav-item').forEach((btn) => {
     btn.addEventListener('click', () => {
       nav.querySelectorAll('.cat-nav-item').forEach((b) => b.classList.remove('active'));
       btn.classList.add('active');
-      document.getElementById(btn.dataset.cat)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      renderItemsForCategory(btn.dataset.cat);
     });
   });
 
-  container.innerHTML = catalog.map((cat) => `
-    <div id="cat-${cat.id}">
-      ${cat.subcategories.map((sub) => renderSubcatSection(cat, sub)).join('') || ''}
-    </div>
-  `).join('');
+  renderItemsForCategory('all');
+}
 
+// 依選取的分類顯示品項；'all' 代表全部商品
+function renderItemsForCategory(catKey) {
+  const container = document.getElementById('subcats-container');
+  const cats = catKey === 'all'
+    ? catalog
+    : catalog.filter((c) => String(c.id) === String(catKey));
+
+  const html = cats
+    .map((cat) => cat.subcategories.map((sub) => renderSubcatSection(cat, sub)).join(''))
+    .join('');
+
+  container.innerHTML = html ||
+    `<div class="empty-state"><div class="icon">📦</div>這個分類底下還沒有上架的品項</div>`;
   container.querySelectorAll('.item-card').forEach(bindItemCard);
+  window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
 function renderSubcatSection(cat, sub) {
@@ -423,7 +436,7 @@ function showOrderConfirmation(order) {
   `).join('');
   document.getElementById('confirm-modal').style.display = 'flex';
   document.getElementById('confirm-print').onclick = () => {
-    window.open(`print-order.html?id=${order.id}`, '_blank');
+    window.open(`print-order.html?id=${order.id}&mode=vendor`, '_blank');
   };
 }
 
@@ -431,6 +444,21 @@ function showOrderConfirmation(order) {
 function bindHistorySearch() {
   document.getElementById('hist-search').addEventListener('click', loadHistory);
 }
+
+const ORDER_STATUS_LABEL = {
+  submitted: '送出訂單',
+  purchasing: '採購處理中',
+  vendor: '廠商處理中',
+  issue: '現場回報異常',
+  closed: '已結案',
+};
+const ORDER_STATUS_CLASS = {
+  submitted: 'badge-pending',
+  purchasing: 'badge-pending',
+  vendor: 'badge-pending',
+  issue: 'badge-rejected',
+  closed: 'badge-approved',
+};
 
 async function loadHistory() {
   const list = document.getElementById('history-list');
@@ -452,38 +480,99 @@ async function loadHistory() {
       list.innerHTML = `<div class="empty-state"><div class="icon">📭</div>沒有符合條件的叫料紀錄</div>`;
       return;
     }
-    list.innerHTML = orders.map((o) => `
+    list.innerHTML = orders.map((o) => {
+      const st = o.status || 'submitted';
+      // 廠商處理中時，現場才會看到「確認收貨」的操作
+      const canReceive = st === 'vendor' || st === 'purchasing' || st === 'submitted';
+      return `
       <div class="ticket">
         <div class="ticket-head">
           <span class="ticket-no">單號 #${String(o.id).padStart(5, '0')}</span>
-          <span class="ticket-meta">${escapeHtml(o.created_at)}</span>
+          <span>
+            <span class="badge ${ORDER_STATUS_CLASS[st]}">${ORDER_STATUS_LABEL[st]}</span>
+            <span class="ticket-meta" style="margin-left:8px;">${escapeHtml(o.created_at)}</span>
+          </span>
         </div>
         <div class="ticket-row">
           <span class="name">${escapeHtml(o.requester_name)}　<span class="sub">${escapeHtml(o.title)}${o.phone ? ' · ' + escapeHtml(o.phone) : ''}</span></span>
         </div>
         <div class="ticket-row sub">案場：${escapeHtml(o.site_name || '-')}　需求日：${escapeHtml(o.need_date || '-')}　類別：${escapeHtml(o.delivery_type || '-')}</div>
+        ${o.vendor ? `<div class="ticket-row sub">廠商：${escapeHtml(o.vendor)}</div>` : ''}
         ${o.items.map((it) => `
           <div class="ticket-row">
             <span class="name">${escapeHtml(it.item_name)} ${[it.spec, it.color].filter(Boolean).map((s) => `· ${escapeHtml(s)}`).join(' ')}</span>
             <span class="sub">x${it.quantity} ${escapeHtml(it.unit || '')}</span>
           </div>
+          ${it.note ? `<div class="ticket-row sub" style="padding-left:12px;">　備註：${escapeHtml(it.note)}</div>` : ''}
         `).join('')}
         ${o.note ? `<div class="ticket-row sub" style="margin-top:6px;">備註：${escapeHtml(o.note)}</div>` : ''}
-        <div class="ticket-row" style="margin-top:10px;">
-          <button type="button" class="btn btn-secondary btn-sm print-order-btn" data-id="${o.id}">列印單據</button>
+        ${o.issue_note ? `<div class="ticket-row sub" style="margin-top:6px; color:var(--danger);">⚠️ 已回報異常：${escapeHtml(o.issue_note)}</div>` : ''}
+        ${o.purchase_reply ? `<div class="ticket-row sub" style="margin-top:4px;">採購處理內容：${escapeHtml(o.purchase_reply)}</div>` : ''}
+
+        <div class="ticket-row" style="margin-top:10px; gap:8px; flex-wrap:wrap;">
+          ${canReceive ? `<button type="button" class="btn btn-primary btn-sm receive-btn" data-id="${o.id}">📦 現場收貨確認</button>` : ''}
+          <button type="button" class="btn btn-secondary btn-sm print-order-btn" data-id="${o.id}">🖨️ 列印單據</button>
         </div>
       </div>
-    `).join('');
+    `;
+    }).join('');
 
     list.querySelectorAll('.print-order-btn').forEach((btn) => {
-      btn.addEventListener('click', () => window.open(`print-order.html?id=${btn.dataset.id}`, '_blank'));
+      btn.addEventListener('click', () => window.open(`print-order.html?id=${btn.dataset.id}&mode=vendor`, '_blank'));
+    });
+    list.querySelectorAll('.receive-btn').forEach((btn) => {
+      btn.addEventListener('click', () => openReceiveModal(btn.dataset.id));
     });
   } catch (err) {
     list.innerHTML = `<div class="empty-state"><div class="icon">⚠️</div>${escapeHtml(err.message)}</div>`;
   }
 }
 
-// ---------- 特殊設備採購 ----------
+// ---------- 現場收貨確認 ----------
+function openReceiveModal(orderId) {
+  document.getElementById('receive-order-id').value = orderId;
+  document.getElementById('receive-no').textContent = `單號 #${String(orderId).padStart(5, '0')}`;
+  document.querySelector('input[name="receive-result"][value="ok"]').checked = true;
+  document.getElementById('receive-issue-note').value = '';
+  document.getElementById('receive-issue-wrap').style.display = 'none';
+  document.getElementById('receive-modal').style.display = 'flex';
+}
+
+function bindReceiveModal() {
+  document.querySelectorAll('input[name="receive-result"]').forEach((radio) => {
+    radio.addEventListener('change', () => {
+      document.getElementById('receive-issue-wrap').style.display =
+        document.querySelector('input[name="receive-result"]:checked').value === 'issue' ? 'block' : 'none';
+    });
+  });
+
+  document.getElementById('receive-cancel').addEventListener('click', () => {
+    document.getElementById('receive-modal').style.display = 'none';
+  });
+
+  document.getElementById('receive-submit').addEventListener('click', async () => {
+    const orderId = document.getElementById('receive-order-id').value;
+    const hasIssue = document.querySelector('input[name="receive-result"]:checked').value === 'issue';
+    const issueNote = document.getElementById('receive-issue-note').value.trim();
+
+    if (hasIssue && !issueNote) return showToast('請填寫異常的問題描述', 'error');
+    if (!hasIssue && !confirm('確認收貨無異常，這筆訂單將直接結案，確定嗎？')) return;
+
+    const btn = document.getElementById('receive-submit');
+    btn.disabled = true;
+    try {
+      await Api.put(`/api/orders/${orderId}/receive`, { has_issue: hasIssue, issue_note: issueNote });
+      document.getElementById('receive-modal').style.display = 'none';
+      showToast(hasIssue ? '已回報異常，將由採購處理' : '收貨完成，訂單已結案', 'success');
+      loadHistory();
+    } catch (err) {
+      showToast(err.message, 'error');
+    } finally {
+      btn.disabled = false;
+    }
+  });
+}
+
 function bindSpecialForm() {
   document.getElementById('special-form').addEventListener('submit', async (e) => {
     e.preventDefault();

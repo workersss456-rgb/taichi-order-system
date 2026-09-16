@@ -4,6 +4,7 @@ const {
   notifyAdminOfSpecialRequest,
   notifyAdminOfRegistration,
   notifyUserOfRegistration,
+  notifyOrderStatusEvent,
 } = require('../mailer');
 
 const router = express.Router();
@@ -238,6 +239,47 @@ router.get('/orders', async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: '查詢歷史紀錄失敗' });
+  }
+});
+
+// ---------- 現場收貨（一般使用者在歷史紀錄操作，不需管理員密碼） ----------
+// 無異常 → 直接結案；有異常 → 填寫問題描述，拋轉回採購處理
+router.put('/orders/:id/receive', async (req, res) => {
+  try {
+    const { has_issue, issue_note } = req.body;
+
+    const current = (await pool.query('SELECT status FROM orders WHERE id = $1', [req.params.id])).rows[0];
+    if (!current) return res.status(404).json({ error: '找不到這筆叫料單' });
+    if (current.status === 'closed') return res.status(400).json({ error: '這筆訂單已經結案了' });
+
+    let row;
+    if (has_issue) {
+      if (!issue_note || !issue_note.trim()) {
+        return res.status(400).json({ error: '請填寫異常的問題描述' });
+      }
+      row = (await pool.query(
+        `UPDATE orders SET status = 'issue', issue_note = $1, received_at = NOW() WHERE id = $2
+         RETURNING *, TO_CHAR(need_date, 'YYYY-MM-DD') AS need_date_fmt`,
+        [issue_note.trim(), req.params.id]
+      )).rows[0];
+      row.need_date = row.need_date_fmt; delete row.need_date_fmt;
+      notifyOrderStatusEvent({ order: row, eventType: 'issue_reported', extra: row.issue_note })
+        .catch((err) => console.error('異常回報通知失敗：', err.message));
+    } else {
+      row = (await pool.query(
+        `UPDATE orders SET status = 'closed', received_at = NOW(), closed_at = NOW() WHERE id = $1
+         RETURNING *, TO_CHAR(need_date, 'YYYY-MM-DD') AS need_date_fmt`,
+        [req.params.id]
+      )).rows[0];
+      row.need_date = row.need_date_fmt; delete row.need_date_fmt;
+      notifyOrderStatusEvent({ order: row, eventType: 'closed', extra: '現場收貨無異常，直接結案' })
+        .catch((err) => console.error('結案通知失敗：', err.message));
+    }
+
+    res.json(row);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: '更新收貨狀態失敗' });
   }
 });
 
