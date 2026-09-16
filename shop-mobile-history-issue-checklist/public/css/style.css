@@ -558,7 +558,7 @@ a { color: var(--primary); }
 
   /* 手機固定一列 2 欄，卡片內容跟著縮小才塞得下 */
   .item-grid { grid-template-columns: 1fr 1fr; gap: 8px; }
-  .item-img { height: 90px; }
+  .item-img { height: 150px; }
   .item-body { padding: 8px 9px 10px; gap: 5px; }
   .item-name { font-size: 12.5px; line-height: 1.3; }
   .item-desc { display: none; } /* 手機版空間有限，說明文字先隱藏，卡片仍可點進去看細節 */
