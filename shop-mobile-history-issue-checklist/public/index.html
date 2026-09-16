@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>叫料系統</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<div class="toast-stack" id="toast-stack"></div>
+
+<header class="topbar">
+  <div class="topbar-inner">
+    <div class="brand"><span class="brand-mark">叫</span> 叫料系統</div>
+
+    <nav class="nav-tabs">
+      <button class="nav-tab active" data-view="shop">商城</button>
+      <button class="nav-tab" data-view="history">歷史紀錄</button>
+      <button class="nav-tab" data-view="special">特殊設備採購</button>
+    </nav>
+
+    <button class="profile-badge" id="profile-badge">👤 尚未登入</button>
+
+    <button class="cart-btn" id="cart-btn">
+      🛒 購物車 <span class="cart-count" id="cart-count">0</span>
+    </button>
+
+    <a class="admin-link" href="admin.html">管理後台</a>
+  </div>
+</header>
+
+<main class="page">
+
+  <!-- ========== 商城 ========== -->
+  <section class="view active" id="view-shop">
+    <div class="shop-layout">
+      <nav class="cat-nav" id="cat-nav"></nav>
+      <div id="subcats-container">
+        <div class="empty-state"><div class="icon">⏳</div>載入商品目錄中…</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ========== 歷史紀錄 ========== -->
+  <section class="view" id="view-history">
+    <div class="section-title">
+      <div>
+        <span class="eyebrow">History</span>
+        <h2>叫料歷史紀錄</h2>
+      </div>
+    </div>
+    <div class="filter-bar">
+      <div class="field"><label>姓名</label><input type="text" id="hist-name" placeholder="搜尋姓名"></div>
+      <div class="field"><label>職稱</label><input type="text" id="hist-title" placeholder="搜尋職稱"></div>
+      <div class="field"><label>起始日期</label><input type="date" id="hist-from"></div>
+      <div class="field"><label>結束日期</label><input type="date" id="hist-to"></div>
+      <button class="btn btn-primary" id="hist-search">搜尋</button>
+    </div>
+    <div class="nav-tabs" id="hist-status-tabs" style="margin-bottom:16px;"></div>
+    <div id="history-list"></div>
+  </section>
+
+  <!-- ========== 特殊設備採購 ========== -->
+  <section class="view" id="view-special">
+    <div class="section-title">
+      <div>
+        <span class="eyebrow">Special Procurement</span>
+        <h2>特殊設備採購申請</h2>
+      </div>
+    </div>
+
+    <div class="card" style="margin-bottom: 28px; max-width: 560px;">
+      <p class="small-note" style="margin-top:-4px; margin-bottom:14px;">
+        目錄裡沒有的設備，可以在這裡提出申請，送出後將由管理員審核並通知。
+      </p>
+      <p class="small-note" id="sp-identity-line" style="margin-bottom:14px;"></p>
+      <form id="special-form">
+        <div class="field"><label>設備品名</label><input type="text" id="sp-item" required></div>
+        <div class="field"><label>建議廠商（選填）</label><input type="text" id="sp-vendor"></div>
+        <div class="field"><label>用途說明</label><textarea id="sp-purpose"></textarea></div>
+        <div class="field"><label>預估預算（選填）</label><input type="text" id="sp-budget" placeholder="例如：NT$ 15,000"></div>
+        <div class="field"><label>數量</label><input type="number" id="sp-qty" value="1" min="1"></div>
+        <div class="field"><label>備註</label><textarea id="sp-note"></textarea></div>
+        <button type="submit" class="btn btn-accent btn-block">送出申請</button>
+      </form>
+    </div>
+
+    <div class="section-title">
+      <div><h3 style="font-size:15px;">我的申請紀錄</h3></div>
+    </div>
+    <div class="filter-bar">
+      <div class="field"><label>姓名</label><input type="text" id="sp-hist-name" placeholder="搜尋姓名"></div>
+      <div class="field"><label>職稱</label><input type="text" id="sp-hist-title" placeholder="搜尋職稱"></div>
+      <button class="btn btn-primary" id="sp-hist-search">搜尋</button>
+    </div>
+    <div id="special-list"></div>
+  </section>
+
+</main>
+
+<div class="overlay" id="overlay"></div>
+
+<div class="cart-drawer" id="cart-drawer">
+  <div class="cart-drawer-header">
+    <h3>購物車</h3>
+    <button class="btn btn-secondary btn-sm" id="cart-close">關閉</button>
+  </div>
+  <div class="cart-drawer-body" id="cart-lines">
+    <div class="empty-state"><div class="icon">🛒</div>購物車是空的</div>
+  </div>
+  <div class="cart-drawer-footer">
+    <div class="field"><label>需求日</label><input type="date" id="cart-need-date"></div>
+    <div class="field"><label>案場名稱</label><select id="cart-site"><option value="">請選擇案場</option></select></div>
+    <div class="field"><label>送貨地址</label><input type="text" id="cart-address" placeholder="選擇案場後會自動帶入，可自行修改"></div>
+    <div class="field"><label>施工用途</label><input type="text" id="cart-purpose" placeholder="例如：3F 廁所漏水維修"></div>
+    <div class="field">
+      <label>類別</label>
+      <div class="radio-group">
+        <label class="radio-option"><input type="radio" name="cart-delivery-type" value="訂貨" checked> 訂貨</label>
+        <label class="radio-option"><input type="radio" name="cart-delivery-type" value="自取"> 自取</label>
+      </div>
+    </div>
+    <div class="field"><label>備註（選填）</label><textarea id="cart-note" placeholder="給管理員的備註…"></textarea></div>
+    <button class="btn btn-primary btn-block" id="cart-submit">送出叫料單</button>
+  </div>
+</div>
+
+<div class="modal-backdrop" id="confirm-modal" style="display:none;">
+  <div class="modal">
+    <div class="ticket" style="border:none; padding:0;">
+      <div class="ticket-head">
+        <span class="ticket-no" id="confirm-no">單號 #—</span>
+        <span class="ticket-meta" id="confirm-date">—</span>
+      </div>
+      <h3>叫料單已送出</h3>
+      <p class="sub">已為您記錄這筆叫料，管理員可於後台查看。</p>
+      <div id="confirm-items"></div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-secondary btn-block" id="confirm-print">列印單據</button>
+      <button class="btn btn-primary btn-block" id="confirm-close">完成</button>
+    </div>
+  </div>
+</div>
+
+<!-- ========== 註冊 / 登入 ========== -->
+<div class="modal-backdrop" id="profile-modal" style="display:none;">
+  <div class="modal">
+    <h3>註冊 / 登入</h3>
+    <p class="sub">不需要密碼，用聯絡手機辨識身份即可。</p>
+
+    <!-- 第一步：輸入手機號碼查詢（已註冊過就直接登入） -->
+    <div id="pf-step-lookup">
+      <div class="field"><label>聯絡手機</label><input type="tel" id="pf-phone-lookup" placeholder="請輸入您的聯絡手機"></div>
+      <button type="button" class="btn btn-primary btn-block" id="pf-lookup-btn">查詢 / 登入</button>
+      <p class="small-note">第一次使用？輸入手機號碼後按上面按鈕，系統會請您補填基本資料完成註冊。</p>
+    </div>
+
+    <!-- 第二步：查無資料時，補填基本資料完成註冊 -->
+    <div id="pf-step-register" style="display:none;">
+      <form id="profile-form">
+        <input type="hidden" id="pf-phone-register">
+        <div class="field"><label>姓名</label><input type="text" id="pf-name" required></div>
+        <div class="field"><label>職稱</label><input type="text" id="pf-title" required></div>
+        <div class="field"><label>Email（選填，用來收到通知信）</label><input type="email" id="pf-email"></div>
+        <button type="submit" class="btn btn-primary btn-block">完成註冊</button>
+      </form>
+      <button type="button" class="btn btn-secondary btn-block" id="pf-back-to-lookup" style="margin-top:8px;">← 返回，換一組手機號碼</button>
+    </div>
+
+    <div class="modal-actions">
+      <button class="btn btn-secondary btn-block" id="profile-modal-close">關閉</button>
+    </div>
+  </div>
+</div>
+
+<!-- ========== 現場收貨確認 ========== -->
+<div class="modal-backdrop" id="receive-modal" style="display:none;">
+  <div class="modal">
+    <h3>現場收貨確認</h3>
+    <p class="sub" id="receive-no">單號 #—</p>
+    <input type="hidden" id="receive-order-id">
+
+    <div class="field" style="margin-top:14px;">
+      <label>收貨結果</label>
+      <div class="radio-group" style="flex-direction:column; gap:8px;">
+        <label class="radio-option"><input type="radio" name="receive-result" value="ok" checked> 無異常，收貨完成（直接結案）</label>
+        <label class="radio-option"><input type="radio" name="receive-result" value="issue"> 有異常，需要採購處理</label>
+      </div>
+    </div>
+
+    <div class="field" id="receive-issue-wrap" style="display:none;">
+      <label>哪些項目有問題？（可複選，沒勾就當作整張單都有狀況）</label>
+      <div id="receive-item-checks" style="border:1px solid var(--border); border-radius:8px; padding:8px 10px; max-height:160px; overflow-y:auto; margin-bottom:10px;"></div>
+      <label>問題描述</label>
+      <textarea id="receive-issue-note" placeholder="例如：A50 管件數量短少 3 支、規格與訂單不符…"></textarea>
+    </div>
+
+    <div class="modal-actions">
+      <button class="btn btn-primary btn-block" id="receive-submit">送出</button>
+      <button class="btn btn-secondary btn-block" id="receive-cancel">取消</button>
+    </div>
+  </div>
+</div>
+
+<script src="js/api.js"></script>
+<script src="js/shop.js"></script>
+</body>
+</html>
