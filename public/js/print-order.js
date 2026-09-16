@@ -13,33 +13,59 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   try {
     const order = await Api.get(`/api/orders/${id}`);
-    root.innerHTML = renderPrintHtml(order);
+    // mode=internal 內部核簽單（含價格）；其他一律當成 vendor 廠商訂購單（不含價格）
+    const showPrice = params.get('mode') === 'internal';
+    document.title = showPrice ? '列印訂購單（內部核簽）' : '列印訂購單（廠商）';
+    if (showPrice) root.classList.add('with-price');
+    root.innerHTML = renderPrintHtml(order, showPrice);
   } catch (err) {
     root.innerHTML = `<p style="text-align:center; padding:40px;">載入失敗：${escapeHtml(err.message)}</p>`;
   }
 });
 
-function renderPrintHtml(order) {
+function renderPrintHtml(order, showPrice) {
   const docTitle = '太綺水電工程有限公司45149105';
   const orderNo = `#${String(order.id).padStart(5, '0')}`;
   const deliveryOrder = order.delivery_type === '訂貨' ? '☑' : '□';
   const deliverySelf = order.delivery_type === '自取' ? '☑' : '□';
 
-  const itemRows = order.items.map((it, i) => `
+  const money = (n) => (n === null || n === undefined || n === '')
+    ? '' : Number(n).toLocaleString('zh-TW', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+  let total = 0;
+  const itemRows = order.items.map((it, i) => {
+    const unit = (it.unit_price === null || it.unit_price === undefined || it.unit_price === '')
+      ? null : Number(it.unit_price);
+    const sub = unit === null ? null : unit * it.quantity;
+    if (sub !== null) total += sub;
+    return `
     <tr>
       <td class="cell-no">${i + 1}</td>
       <td>${escapeHtml(it.item_name)}</td>
       <td>${escapeHtml([it.spec, it.color].filter(Boolean).join(' / '))}</td>
       <td class="cell-qty">${it.quantity}</td>
       <td class="cell-unit">${escapeHtml(it.unit || '')}</td>
+      ${showPrice ? `<td class="cell-money">${money(it.list_price)}</td>
+      <td class="cell-qty">${it.discount === null || it.discount === undefined || it.discount === '' ? '' : Number(it.discount)}</td>
+      <td class="cell-money">${money(unit)}</td>
+      <td class="cell-money">${money(sub)}</td>` : ''}
       <td>${escapeHtml(it.note || '')}</td>
     </tr>
-  `).join('');
+  `;
+  }).join('');
+
+  const colCount = showPrice ? 10 : 6;
+  const priceHead = showPrice
+    ? '<th class="col-money">牌價</th><th class="col-qty">折數</th><th class="col-money">單價</th><th class="col-money">小計</th>'
+    : '';
+  const totalRow = showPrice
+    ? `<tr><td colspan="${colCount - 2}" style="text-align:right; font-weight:700;">合計</td><td class="cell-money" style="font-weight:700;">${money(total)}</td><td></td></tr>`
+    : '';
 
   return `
     <div class="doc-header">
       <img src="images/logo.png" alt="太綺水電 TaiChi EMP">
-      <div class="doc-title">${escapeHtml(docTitle)}<div class="sub-line">訂購單　單號 ${orderNo}</div></div>
+      <div class="doc-title">${escapeHtml(docTitle)}<div class="sub-line">訂購單　單號 ${orderNo}${showPrice ? '（內部核簽）' : ''}</div></div>
     </div>
 
     <table class="info-table">
@@ -63,19 +89,20 @@ function renderPrintHtml(order) {
 
     <table class="item-table">
       <thead>
-        <tr class="repeat-title"><th colspan="6"><img src="images/logo.png" alt="">${escapeHtml(docTitle)}　訂購單　單號 ${orderNo}</th></tr>
+        <tr class="repeat-title"><th colspan="${colCount}"><img src="images/logo.png" alt="">${escapeHtml(docTitle)}　訂購單　單號 ${orderNo}</th></tr>
         <tr class="col-head">
-          <th class="col-no">項次</th><th>名稱</th><th>規格</th><th class="col-qty">數量</th><th class="col-unit">單位</th><th>備註</th>
+          <th class="col-no">項次</th><th>名稱</th><th>規格</th><th class="col-qty">數量</th><th class="col-unit">單位</th>${priceHead}<th>備註</th>
         </tr>
       </thead>
       <tbody>
         ${itemRows}
+        ${totalRow}
       </tbody>
     </table>
     <table class="footer-table">
-      <tr><td colspan="6" class="remark-cell">備註：${escapeHtml(order.note || '')}</td></tr>
+      <tr><td colspan="${colCount}" class="remark-cell">備註：${escapeHtml(order.note || '')}</td></tr>
       <tr>
-        <td colspan="6" style="padding:0;">
+        <td colspan="${colCount}" style="padding:0;">
           <div class="sign-row">
             <div class="sign-box"><div class="sign-label">總經理</div><div class="sign-space"></div></div>
             <div class="sign-box"><div class="sign-label">成控部</div><div class="sign-space"></div></div>

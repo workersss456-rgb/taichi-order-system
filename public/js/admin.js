@@ -112,21 +112,76 @@ async function loadCatalogManagement() {
   }
 }
 
+// ============================================================
+// 拖曳排序（通用輔助函式）
+// container：包住這些可拖曳元素的容器
+// itemSelector：可拖曳元素的選擇器（元素身上要有 data-sort-id）
+// axis：'y' 直向排列（清單、表格列）、'x' 橫向排列（子分類標籤）
+// onReorder：放開滑鼠後拿到「新順序的 id 陣列」，負責存回後端
+// ============================================================
+function enableDragSort(container, itemSelector, axis, onReorder) {
+  let dragEl = null;
+
+  container.querySelectorAll(itemSelector).forEach((el) => {
+    el.setAttribute('draggable', 'true');
+    el.classList.add('draggable-row');
+
+    el.addEventListener('dragstart', (e) => {
+      // 子分類標籤在分類區塊裡面，不擋住事件冒泡的話會連外層分類一起拖到
+      e.stopPropagation();
+      dragEl = el;
+      el.classList.add('dragging');
+      e.dataTransfer.effectAllowed = 'move';
+      // Firefox 一定要設定資料才會真的開始拖曳
+      e.dataTransfer.setData('text/plain', '');
+    });
+
+    el.addEventListener('dragend', async (e) => {
+      e.stopPropagation();
+      el.classList.remove('dragging');
+      dragEl = null;
+      const ids = [...container.querySelectorAll(itemSelector)].map((x) => +x.dataset.sortId);
+      await onReorder(ids);
+    });
+
+    el.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (!dragEl || dragEl === el || dragEl.parentNode !== el.parentNode) return;
+      const rect = el.getBoundingClientRect();
+      const after = axis === 'x'
+        ? (e.clientX - rect.left) > rect.width / 2
+        : (e.clientY - rect.top) > rect.height / 2;
+      el.parentNode.insertBefore(dragEl, after ? el.nextSibling : el);
+    });
+  });
+}
+
+async function saveOrder(type, ids) {
+  try {
+    await Api.put('/api/admin/reorder', { type, ids }, true);
+    showToast('排序已儲存', 'success');
+  } catch (err) {
+    showToast(err.message, 'error');
+  }
+}
+
 function renderCatTree(catalog) {
   const tree = document.getElementById('cat-tree');
   if (!catalog.length) {
     tree.innerHTML = `<p class="small-note">還沒有任何分類，先在上面新增一個吧。</p>`;
     return;
   }
-  tree.innerHTML = catalog.map((cat) => `
-    <div style="margin-bottom:10px; border:1px solid var(--border); border-radius:8px; padding:10px 12px;">
+  tree.innerHTML = `<p class="small-note" style="margin-bottom:10px;">💡 用滑鼠拖曳分類區塊或子分類標籤即可調整順序，放開就自動儲存。</p>` +
+    catalog.map((cat) => `
+    <div class="cat-block" data-sort-id="${cat.id}" style="margin-bottom:10px; border:1px solid var(--border); border-radius:8px; padding:10px 12px;">
       <div style="display:flex; align-items:center; justify-content:space-between;">
-        <strong>${escapeHtml(cat.name)}</strong>
+        <strong><span class="drag-handle">⋮⋮</span>${escapeHtml(cat.name)}</strong>
         <button class="btn btn-danger btn-sm" data-del-cat="${cat.id}">刪除分類</button>
       </div>
-      <div class="tag-input-list" style="margin-top:8px;">
+      <div class="tag-input-list sub-list" style="margin-top:8px;">
         ${cat.subcategories.map((s) => `
-          <span class="tag-pill">${escapeHtml(s.name)}<button data-del-sub="${s.id}" title="刪除子分類">×</button></span>
+          <span class="tag-pill" data-sort-id="${s.id}">${escapeHtml(s.name)}<button data-del-sub="${s.id}" title="刪除子分類">×</button></span>
         `).join('')}
         <span class="tag-pill" style="background:transparent; border-style:dashed;">
           <input type="text" placeholder="+ 新增子分類" data-new-sub="${cat.id}" style="border:none; background:transparent; width:100px; outline:none;">
@@ -134,6 +189,13 @@ function renderCatTree(catalog) {
       </div>
     </div>
   `).join('');
+
+  // 分類本身可以上下拖曳
+  enableDragSort(tree, '.cat-block', 'y', (ids) => saveOrder('categories', ids));
+  // 每個分類底下的子分類標籤可以左右拖曳
+  tree.querySelectorAll('.sub-list').forEach((list) => {
+    enableDragSort(list, '.tag-pill[data-sort-id]', 'x', (ids) => saveOrder('subcategories', ids));
+  });
 
   tree.querySelectorAll('[data-del-cat]').forEach((btn) => btn.addEventListener('click', async () => {
     if (!confirm('刪除分類會一併刪除底下的子分類與品項設定（歷史紀錄不受影響），確定嗎？')) return;
@@ -182,8 +244,8 @@ function renderItemsTable() {
   tbody.innerHTML = items.map((it) => {
     const sub = subcategories.find((s) => s.id === it.subcategory_id);
     return `
-      <tr>
-        <td><img src="${escapeAttr(it.image_url || '')}" alt="" style="width:36px;height:36px;object-fit:cover;border-radius:6px;background:var(--surface-sunken);"></td>
+      <tr data-sort-id="${it.id}">
+        <td><span class="drag-handle">⋮⋮</span><img src="${escapeAttr(it.image_url || '')}" alt="" style="width:36px;height:36px;object-fit:cover;border-radius:6px;background:var(--surface-sunken);vertical-align:middle;"></td>
         <td>${escapeHtml(it.name)}</td>
         <td>${escapeHtml(sub ? sub.name : '—')}</td>
         <td>${(it.specs || []).map(escapeHtml).join(', ') || '—'}</td>
@@ -200,8 +262,7 @@ function renderItemsTable() {
   tbody.querySelectorAll('[data-edit]').forEach((btn) => btn.addEventListener('click', () => {
     const item = items.find((i) => i.id === +btn.dataset.edit);
     if (item) openItemForm(item);
-  }));
-  tbody.querySelectorAll('[data-del]').forEach((btn) => btn.addEventListener('click', async () => {
+  }));  tbody.querySelectorAll('[data-del]').forEach((btn) => btn.addEventListener('click', async () => {
     if (!confirm('確定要刪除這個品項嗎？（過去的叫料歷史紀錄不會受影響）')) return;
     try {
       await Api.del(`/api/admin/items/${btn.dataset.del}`, true);
@@ -209,6 +270,8 @@ function renderItemsTable() {
       showToast('品項已刪除', 'success');
     } catch (err) { showToast(err.message, 'error'); }
   }));
+
+  enableDragSort(tbody, 'tr[data-sort-id]', 'y', (ids) => saveOrder('items', ids));
 }
 
 function openItemForm(item) {
@@ -286,8 +349,8 @@ function renderSitesTable() {
     return;
   }
   tbody.innerHTML = sites.map((s) => `
-    <tr>
-      <td>${escapeHtml(s.name)}</td>
+    <tr data-sort-id="${s.id}">
+      <td><span class="drag-handle">⋮⋮</span>${escapeHtml(s.name)}</td>
       <td>${escapeHtml(s.address || '—')}</td>
       <td>${s.sort_order}</td>
       <td class="actions">
@@ -296,6 +359,8 @@ function renderSitesTable() {
       </td>
     </tr>
   `).join('');
+
+  enableDragSort(tbody, 'tr[data-sort-id]', 'y', (ids) => saveOrder('sites', ids));
 
   tbody.querySelectorAll('[data-edit-site]').forEach((btn) => btn.addEventListener('click', () => {
     const site = sites.find((s) => s.id === +btn.dataset.editSite);
@@ -416,6 +481,72 @@ function bindHistoryPanel() {
   document.getElementById('ah-export').addEventListener('click', exportCsv);
 }
 
+const ORDER_STATUS_LABEL = {
+  submitted: '送出訂單',
+  purchasing: '採購處理中',
+  vendor: '廠商處理中',
+  issue: '現場回報異常',
+  closed: '已結案',
+};
+const ORDER_STATUS_CLASS = {
+  submitted: 'badge-pending',
+  purchasing: 'badge-pending',
+  vendor: 'badge-pending',
+  issue: 'badge-rejected',
+  closed: 'badge-approved',
+};
+// 每個狀態底下，後台可以按的「下一步」按鈕
+const ORDER_NEXT_STEPS = {
+  submitted: [{ status: 'purchasing', label: '→ 採購處理中' }],
+  purchasing: [{ status: 'vendor', label: '→ 廠商處理中' }],
+  vendor: [{ status: 'closed', label: '✓ 直接結案' }],
+  issue: [{ status: 'closed', label: '✓ 處理完成，結案' }],
+  closed: [],
+};
+
+function money(n) {
+  if (n === null || n === undefined || n === '') return '';
+  return Number(n).toLocaleString('zh-TW', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+function renderPricingBlock(o) {
+  const rows = o.items.map((it) => {
+    const sub = (it.unit_price !== null && it.unit_price !== undefined && it.unit_price !== '')
+      ? Number(it.unit_price) * it.quantity : null;
+    return `
+      <tr>
+        <td>${escapeHtml(it.item_name)} ${[it.spec, it.color].filter(Boolean).map(escapeHtml).join(' / ')}</td>
+        <td style="text-align:center;">${it.quantity} ${escapeHtml(it.unit || '')}</td>
+        <td><input type="number" step="0.01" min="0" class="price-list" data-item="${it.id}" value="${it.list_price ?? ''}" placeholder="牌價" style="width:90px; padding:4px 6px; border:1px solid var(--border); border-radius:5px; background:var(--surface-sunken);"></td>
+        <td><input type="number" step="0.01" min="0" max="1" class="price-disc" data-item="${it.id}" value="${it.discount ?? ''}" placeholder="0.75" style="width:70px; padding:4px 6px; border:1px solid var(--border); border-radius:5px; background:var(--surface-sunken);"></td>
+        <td class="price-unit" data-item="${it.id}" style="text-align:right;">${money(it.unit_price)}</td>
+        <td class="price-sub" data-item="${it.id}" style="text-align:right;">${money(sub)}</td>
+      </tr>
+    `;
+  }).join('');
+
+  const total = o.items.reduce((sum, it) => {
+    const up = Number(it.unit_price);
+    return sum + (isNaN(up) || it.unit_price === null ? 0 : up * it.quantity);
+  }, 0);
+
+  return `
+    <details class="pricing-block" style="margin-top:10px;">
+      <summary style="cursor:pointer; font-weight:600; font-size:13px; color:var(--text-secondary);">
+        💰 廠商報價 / 材料預估（目前總計 NT$ <span class="price-total" data-id="${o.id}">${money(total)}</span>）
+      </summary>
+      <div style="overflow-x:auto; margin-top:8px;">
+        <table class="table pricing-table" data-id="${o.id}" style="font-size:12.5px;">
+          <thead><tr><th>品項</th><th style="text-align:center;">數量</th><th>牌價</th><th>折數<br><span style="font-weight:400; font-size:11px;">(小數，如 0.75)</span></th><th style="text-align:right;">單價</th><th style="text-align:right;">小計</th></tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+      <button class="btn btn-primary btn-sm save-pricing-btn" data-id="${o.id}" style="margin-top:8px;">儲存報價</button>
+      <p class="small-note">單價 = 牌價 × 折數，由系統自動計算。折數請填小數，例如 75 折填 0.75、9 折填 0.9。</p>
+    </details>
+  `;
+}
+
 async function loadHistoryPanel() {
   const list = document.getElementById('admin-history-list');
   list.innerHTML = `<div class="empty-state"><div class="icon">⏳</div>查詢中…</div>`;
@@ -425,22 +556,33 @@ async function loadHistoryPanel() {
   const title = document.getElementById('ah-title').value.trim();
   const from = document.getElementById('ah-from').value;
   const to = document.getElementById('ah-to').value;
+  const statusEl = document.getElementById('ah-status');
+  const status = statusEl ? statusEl.value : '';
   if (name) params.set('name', name);
   if (title) params.set('title', title);
   if (from) params.set('from', from);
   if (to) params.set('to', to);
 
   try {
-    const orders = await Api.get(`/api/orders?${params.toString()}`, true);
+    let orders = await Api.get(`/api/orders?${params.toString()}`, true);
+    if (status) orders = orders.filter((o) => (o.status || 'submitted') === status);
+
     if (!orders.length) {
       list.innerHTML = `<div class="empty-state"><div class="icon">📭</div>沒有符合條件的叫料紀錄</div>`;
       return;
     }
-    list.innerHTML = orders.map((o) => `
+
+    list.innerHTML = orders.map((o) => {
+      const st = o.status || 'submitted';
+      const nextSteps = ORDER_NEXT_STEPS[st] || [];
+      return `
       <div class="ticket">
         <div class="ticket-head">
           <span class="ticket-no">單號 #${String(o.id).padStart(5, '0')}</span>
-          <span class="ticket-meta">${escapeHtml(o.created_at)}</span>
+          <span>
+            <span class="badge ${ORDER_STATUS_CLASS[st]}">${ORDER_STATUS_LABEL[st]}</span>
+            <span class="ticket-meta" style="margin-left:8px;">${escapeHtml(o.created_at)}</span>
+          </span>
         </div>
         <div class="ticket-row"><span class="name">${escapeHtml(o.requester_name)}　<span class="sub">${escapeHtml(o.title)}${o.phone ? ' · ' + escapeHtml(o.phone) : ''}</span></span></div>
         <div class="ticket-row sub">
@@ -455,27 +597,105 @@ async function loadHistoryPanel() {
           ${it.note ? `<div class="ticket-row sub" style="padding-left:12px;">　備註：${escapeHtml(it.note)}</div>` : ''}
         `).join('')}
         ${o.note ? `<div class="ticket-row sub" style="margin-top:6px;">訂單備註：${escapeHtml(o.note)}</div>` : ''}
-        <div class="ticket-row" style="margin-top:10px; gap:8px; align-items:center;">
-          <input type="text" class="vendor-input" data-id="${o.id}" placeholder="廠商（採購填寫）" value="${escapeAttr(o.vendor || '')}" style="flex:1; padding:6px 9px; border:1px solid var(--border); border-radius:6px; background:var(--surface-sunken);">
+
+        ${o.issue_note ? `<div class="ticket-row sub" style="margin-top:8px; color:var(--danger);">⚠️ 現場回報異常：${escapeHtml(o.issue_note)}</div>` : ''}
+
+        ${st === 'issue' || o.purchase_reply ? `
+          <div class="field" style="margin-top:8px;">
+            <label>採購處理內容</label>
+            <textarea class="reply-input" data-id="${o.id}" placeholder="說明如何處理這個異常…">${escapeHtml(o.purchase_reply || '')}</textarea>
+            <button class="btn btn-secondary btn-sm save-reply-btn" data-id="${o.id}">儲存處理內容</button>
+          </div>
+        ` : ''}
+
+        <div class="ticket-row" style="margin-top:10px; gap:8px; align-items:center; flex-wrap:wrap;">
+          <input type="text" class="vendor-input" data-id="${o.id}" placeholder="廠商（採購填寫）" value="${escapeAttr(o.vendor || '')}" style="flex:1; min-width:140px; padding:6px 9px; border:1px solid var(--border); border-radius:6px; background:var(--surface-sunken);">
           <button class="btn btn-secondary btn-sm save-vendor-btn" data-id="${o.id}">儲存廠商</button>
-          <button class="btn btn-secondary btn-sm print-order-btn" data-id="${o.id}">列印單據</button>
+        </div>
+
+        ${renderPricingBlock(o)}
+
+        <div class="ticket-row" style="margin-top:10px; gap:8px; flex-wrap:wrap;">
+          ${nextSteps.map((s) => `<button class="btn btn-primary btn-sm status-btn" data-id="${o.id}" data-status="${s.status}">${s.label}</button>`).join('')}
+          <button class="btn btn-secondary btn-sm print-order-btn" data-id="${o.id}" data-mode="vendor">🖨️ 廠商訂購單（不含價格）</button>
+          <button class="btn btn-secondary btn-sm print-order-btn" data-id="${o.id}" data-mode="internal">🖨️ 內部核簽單（含價格）</button>
         </div>
       </div>
-    `).join('');
+    `;
+    }).join('');
 
-    list.querySelectorAll('.save-vendor-btn').forEach((btn) => btn.addEventListener('click', async () => {
-      const input = list.querySelector(`.vendor-input[data-id="${btn.dataset.id}"]`);
-      try {
-        await Api.put(`/api/admin/orders/${btn.dataset.id}/vendor`, { vendor: input.value.trim() }, true);
-        showToast('廠商已更新', 'success');
-      } catch (err) { showToast(err.message, 'error'); }
-    }));
-    list.querySelectorAll('.print-order-btn').forEach((btn) => {
-      btn.addEventListener('click', () => window.open(`print-order.html?id=${btn.dataset.id}`, '_blank'));
-    });
+    bindHistoryActions(list);
   } catch (err) {
     list.innerHTML = `<div class="empty-state"><div class="icon">⚠️</div>${escapeHtml(err.message)}</div>`;
   }
+}
+
+function bindHistoryActions(list) {
+  list.querySelectorAll('.save-vendor-btn').forEach((btn) => btn.addEventListener('click', async () => {
+    const input = list.querySelector(`.vendor-input[data-id="${btn.dataset.id}"]`);
+    try {
+      await Api.put(`/api/admin/orders/${btn.dataset.id}/vendor`, { vendor: input.value.trim() }, true);
+      showToast('廠商已更新', 'success');
+    } catch (err) { showToast(err.message, 'error'); }
+  }));
+
+  list.querySelectorAll('.save-reply-btn').forEach((btn) => btn.addEventListener('click', async () => {
+    const ta = list.querySelector(`.reply-input[data-id="${btn.dataset.id}"]`);
+    try {
+      await Api.put(`/api/admin/orders/${btn.dataset.id}/purchase-reply`, { purchase_reply: ta.value.trim() }, true);
+      showToast('處理內容已儲存', 'success');
+    } catch (err) { showToast(err.message, 'error'); }
+  }));
+
+  list.querySelectorAll('.status-btn').forEach((btn) => btn.addEventListener('click', async () => {
+    if (btn.dataset.status === 'closed' && !confirm('確定要結案嗎？結案後會寄送通知信給訂購人。')) return;
+    try {
+      await Api.put(`/api/admin/orders/${btn.dataset.id}/status`, { status: btn.dataset.status }, true);
+      showToast('訂單狀態已更新', 'success');
+      loadHistoryPanel();
+    } catch (err) { showToast(err.message, 'error'); }
+  }));
+
+  list.querySelectorAll('.print-order-btn').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      window.open(`print-order.html?id=${btn.dataset.id}&mode=${btn.dataset.mode}`, '_blank');
+    });
+  });
+
+  // 報價：牌價/折數改變時，即時算出單價、小計與總計
+  list.querySelectorAll('.pricing-table').forEach((table) => {
+    const recalc = () => {
+      let total = 0;
+      table.querySelectorAll('tbody tr').forEach((tr) => {
+        const listInput = tr.querySelector('.price-list');
+        const discInput = tr.querySelector('.price-disc');
+        const qty = parseFloat(tr.children[1].textContent) || 0;
+        const l = parseFloat(listInput.value);
+        const d = parseFloat(discInput.value);
+        const unit = (!isNaN(l) && !isNaN(d)) ? Math.round(l * d * 100) / 100 : null;
+        tr.querySelector('.price-unit').textContent = unit === null ? '' : money(unit);
+        const sub = unit === null ? null : unit * qty;
+        tr.querySelector('.price-sub').textContent = sub === null ? '' : money(sub);
+        if (sub !== null) total += sub;
+      });
+      const totalEl = list.querySelector(`.price-total[data-id="${table.dataset.id}"]`);
+      if (totalEl) totalEl.textContent = money(total);
+    };
+    table.querySelectorAll('.price-list, .price-disc').forEach((inp) => inp.addEventListener('input', recalc));
+  });
+
+  list.querySelectorAll('.save-pricing-btn').forEach((btn) => btn.addEventListener('click', async () => {
+    const table = list.querySelector(`.pricing-table[data-id="${btn.dataset.id}"]`);
+    const items = [...table.querySelectorAll('tbody tr')].map((tr) => ({
+      id: +tr.querySelector('.price-list').dataset.item,
+      list_price: tr.querySelector('.price-list').value,
+      discount: tr.querySelector('.price-disc').value,
+    }));
+    try {
+      await Api.put(`/api/admin/orders/${btn.dataset.id}/pricing`, { items }, true);
+      showToast('報價已儲存', 'success');
+    } catch (err) { showToast(err.message, 'error'); }
+  }));
 }
 
 async function exportCsv() {
