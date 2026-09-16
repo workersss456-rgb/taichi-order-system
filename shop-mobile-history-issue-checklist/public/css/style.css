@@ -317,7 +317,7 @@ a { color: var(--primary); }
   padding: 10px 0;
   border-bottom: 1px solid var(--border);
 }
-.cart-line img { width: 48px; height: 48px; border-radius: var(--radius-sm); object-fit: cover; background: var(--surface-sunken); }
+.cart-line img { width: 48px; height: 100px; border-radius: var(--radius-sm); object-fit: cover; background: var(--surface-sunken); }
 .cart-line-info { flex: 1; }
 .cart-line-name { font-weight: 600; font-size: 13.5px; }
 .cart-line-meta { font-size: 12px; color: var(--text-secondary); }
