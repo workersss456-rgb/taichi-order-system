@@ -651,7 +651,7 @@ async function loadHistoryPanel() {
         <div class="ticket-row sub">送貨地址：${escapeHtml(o.site_address || '-')}　施工用途：${escapeHtml(o.purpose || '-')}</div>
         ${o.items.map((it) => `
           <div class="ticket-row">
-            <span class="name">${escapeHtml(it.item_name)} ${[it.spec, it.color].filter(Boolean).map((s) => `· ${escapeHtml(s)}`).join(' ')}</span>
+            <span class="name">${it.has_issue ? '<span style="color:var(--danger); font-weight:700;">⚠️ </span>' : ''}${escapeHtml(it.item_name)} ${[it.spec, it.color].filter(Boolean).map((s) => `· ${escapeHtml(s)}`).join(' ')}</span>
             <span class="sub">x${it.quantity} ${escapeHtml(it.unit || '')}</span>
           </div>
           ${it.note ? `<div class="ticket-row sub" style="padding-left:12px;">　備註：${escapeHtml(it.note)}</div>` : ''}

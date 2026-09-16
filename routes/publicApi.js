@@ -246,7 +246,7 @@ router.get('/orders', async (req, res) => {
 // 無異常 → 直接結案；有異常 → 填寫問題描述，拋轉回採購處理
 router.put('/orders/:id/receive', async (req, res) => {
   try {
-    const { has_issue, issue_note } = req.body;
+    const { has_issue, issue_note, issue_item_ids } = req.body;
 
     const current = (await pool.query('SELECT status FROM orders WHERE id = $1', [req.params.id])).rows[0];
     if (!current) return res.status(404).json({ error: '找不到這筆叫料單' });
@@ -256,6 +256,12 @@ router.put('/orders/:id/receive', async (req, res) => {
     if (has_issue) {
       if (!issue_note || !issue_note.trim()) {
         return res.status(400).json({ error: '請填寫異常的問題描述' });
+      }
+      if (Array.isArray(issue_item_ids) && issue_item_ids.length) {
+        await pool.query(
+          'UPDATE order_items SET has_issue = true WHERE order_id = $1 AND id = ANY($2::int[])',
+          [req.params.id, issue_item_ids]
+        );
       }
       row = (await pool.query(
         `UPDATE orders SET status = 'issue', issue_note = $1, received_at = NOW() WHERE id = $2
