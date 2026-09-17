@@ -2,12 +2,15 @@ let categories = [];
 let subcategories = [];
 let items = [];
 let sites = [];
+let vendors = [];
+let discountGroups = [];
 
 document.addEventListener('DOMContentLoaded', () => {
   bindLogin();
   bindAdminNav();
   bindCatalogManagement();
   bindSiteManagement();
+  bindPricingPanel();
   bindSpecialReview();
   bindHistoryPanel();
 
@@ -56,6 +59,7 @@ function enterAdmin() {
   document.getElementById('login-screen').style.display = 'none';
   document.getElementById('admin-shell').style.display = 'grid';
   loadCatalogManagement();
+  loadPricingPanel();
   loadSiteManagement();
   loadSpecialReview();
   loadHistoryPanel();
@@ -97,14 +101,23 @@ function bindCatalogManagement() {
     renderItemsTable();
   });
   document.getElementById('filter-subcat').addEventListener('change', renderItemsTable);
+
+  // 規格欄位一改，下方牌價表就跟著增減列（已輸入的數字會保留）
+  document.getElementById('item-specs').addEventListener('input', () => renderPriceEditor(collectPriceEditor()));
+
+  document.getElementById('price-export-btn').addEventListener('click', exportPriceCsv);
+  document.getElementById('price-import-btn').addEventListener('click', () => document.getElementById('price-import-file').click());
+  document.getElementById('price-import-file').addEventListener('change', importPriceCsv);
 }
 
 async function loadCatalogManagement() {
   try {
-    const [catalog, allItems] = await Promise.all([
+    const [catalog, allItems, groups] = await Promise.all([
       Api.get('/api/catalog'),
       Api.get('/api/admin/items', true),
+      Api.get('/api/admin/discount-groups', true),
     ]);
+    discountGroups = groups;
     // catalog 只含上架品項，這裡另外組出完整的分類/子分類清單（含空的）
     categories = catalog.map((c) => ({ id: c.id, name: c.name }));
     subcategories = [];
@@ -281,7 +294,7 @@ function renderItemsTable() {
   const tbody = document.getElementById('items-tbody');
   const filtered = getFilteredItems();
   if (!filtered.length) {
-    tbody.innerHTML = `<tr><td colspan="7" class="small-note" style="text-align:center; padding:20px;">這個篩選條件下還沒有品項</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="8" class="small-note" style="text-align:center; padding:20px;">這個篩選條件下還沒有品項</td></tr>`;
     return;
   }
   tbody.innerHTML = filtered.map((it) => {
@@ -293,6 +306,7 @@ function renderItemsTable() {
         <td>${escapeHtml(sub ? sub.name : '—')}</td>
         <td>${(it.specs || []).map(escapeHtml).join(', ') || '—'}</td>
         <td>${(it.colors || []).map(escapeHtml).join(', ') || '—'}</td>
+        <td>${renderPriceSummary(it)}</td>
         <td>${it.active ? '<span class="badge badge-approved">上架中</span>' : '<span class="badge badge-rejected">已下架</span>'}</td>
         <td class="actions">
           <button class="btn btn-secondary btn-sm" data-edit="${it.id}">編輯</button>
@@ -339,6 +353,7 @@ function openItemForm(item) {
   document.getElementById('item-colors').value = item ? (item.colors || []).join(', ') : '';
   document.getElementById('item-sort').value = item ? item.sort_order : 0;
   document.getElementById('item-active').checked = item ? !!item.active : true;
+  renderPriceEditor(item ? (item.prices || []) : []);
 }
 
 function closeItemForm() {
@@ -359,7 +374,10 @@ async function submitItemForm(e) {
     colors: splitCsv(document.getElementById('item-colors').value),
     sort_order: +document.getElementById('item-sort').value || 0,
     active: document.getElementById('item-active').checked,
+    prices: collectPriceEditor(),
   };
+  const badPrice = payload.prices.find((p) => p.list_price !== '' && !(Number(p.list_price.replace(/,/g, '')) >= 0));
+  if (badPrice) return showToast(`規格「${badPrice.spec || '（無規格）'}」的牌價不是數字`, 'error');
 
   // 同一個子分類底下已經有同名品項的話，先提醒一下，讓使用者自己決定要不要繼續
   const dup = items.find((it) =>
@@ -377,6 +395,127 @@ async function submitItemForm(e) {
     closeItemForm();
     loadCatalogManagement();
     showToast('品項已儲存', 'success');
+  } catch (err) {
+    showToast(err.message, 'error');
+  }
+}
+
+// ---------- 品項牌價 ----------
+function renderPriceSummary(it) {
+  const specs = (it.specs && it.specs.length) ? it.specs : [''];
+  const values = specs
+    .map((sp) => (it.prices || []).find((p) => p.spec === sp))
+    .map((p) => (p && p.list_price !== null && p.list_price !== undefined) ? Number(p.list_price) : null);
+  const filled = values.filter((v) => v !== null);
+  const missing = values.length - filled.length;
+  if (!filled.length) return '<span class="price-missing">未設定</span>';
+  const min = Math.min(...filled);
+  const max = Math.max(...filled);
+  const range = min === max ? money(min) : `${money(min)}–${money(max)}`;
+  return `<span class="price-range">${range}</span>${missing ? `<div class="price-missing">${missing} 個規格未填</div>` : ''}`;
+}
+
+function renderPriceEditor(prices) {
+  const specs = splitCsv(document.getElementById('item-specs').value);
+  const rows = specs.length ? specs : [''];
+  const groupOptions = (selected) => '<option value="">（未指定）</option>' +
+    discountGroups.map((g) => `<option value="${g.id}" ${String(g.id) === String(selected ?? '') ? 'selected' : ''}>${escapeHtml(g.name)}</option>`).join('');
+  document.getElementById('item-price-editor').innerHTML = `
+    <table class="price-editor-table">
+      <thead><tr><th style="width:30%;">規格</th><th style="width:30%;">牌價</th><th>折扣群組</th></tr></thead>
+      <tbody>
+        ${rows.map((sp) => {
+          const p = prices.find((x) => x.spec === sp) || {};
+          return `<tr data-spec="${escapeAttr(sp)}">
+            <td>${sp ? escapeHtml(sp) : '<span class="small-note">（無規格）</span>'}</td>
+            <td><input type="text" inputmode="decimal" class="mini-input pe-price" value="${escapeAttr(p.list_price ?? '')}" placeholder="例如 1200"></td>
+            <td><select class="mini-input pe-group">${groupOptions(p.group_id)}</select></td>
+          </tr>`;
+        }).join('')}
+      </tbody>
+    </table>`;
+}
+
+function collectPriceEditor() {
+  return [...document.querySelectorAll('#item-price-editor tbody tr')].map((tr) => ({
+    spec: tr.dataset.spec,
+    list_price: tr.querySelector('.pe-price').value.trim(),
+    group_id: tr.querySelector('.pe-group').value || null,
+  }));
+}
+
+async function downloadAdminFile(url, filename) {
+  const res = await fetch(url, { headers: Api.adminHeaders() });
+  if (!res.ok) throw new Error('下載失敗，請確認已登入管理後台');
+  const blob = await res.blob();
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(a.href);
+}
+
+async function exportPriceCsv() {
+  try { await downloadAdminFile('/api/admin/item-prices/export.csv', 'item-prices.csv'); }
+  catch (err) { showToast(err.message, 'error'); }
+}
+
+// Excel 另存 CSV 在繁中 Windows 常是 Big5，先試 UTF-8，失敗再用 Big5 解碼
+function decodeCsvBuffer(buf) {
+  try { return new TextDecoder('utf-8', { fatal: true }).decode(buf).replace(/^\uFEFF/, ''); }
+  catch (e) { return new TextDecoder('big5').decode(buf); }
+}
+
+function parseCsv(text) {
+  const rows = [];
+  let row = [], field = '', inQuotes = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (inQuotes) {
+      if (c === '"' && text[i + 1] === '"') { field += '"'; i++; }
+      else if (c === '"') inQuotes = false;
+      else field += c;
+    } else if (c === '"') inQuotes = true;
+    else if (c === ',') { row.push(field); field = ''; }
+    else if (c === '\n' || c === '\r') {
+      if (c === '\r' && text[i + 1] === '\n') i++;
+      row.push(field); rows.push(row); row = []; field = '';
+    } else field += c;
+  }
+  if (field !== '' || row.length) { row.push(field); rows.push(row); }
+  return rows.filter((r) => r.some((v) => v.trim() !== ''));
+}
+
+async function importPriceCsv(e) {
+  const file = e.target.files[0];
+  e.target.value = '';
+  if (!file) return;
+  try {
+    const table = parseCsv(decodeCsvBuffer(await file.arrayBuffer()));
+    if (table.length < 2) throw new Error('CSV 裡沒有資料列');
+    const head = table[0].map((h) => h.trim());
+    const col = (name) => head.indexOf(name);
+    const need = ['品項ID', '規格', '牌價', '折扣群組'];
+    const lack = need.filter((n) => col(n) === -1);
+    if (lack.length) throw new Error(`CSV 缺少欄位：${lack.join('、')}（請用「匯出牌價 CSV」的檔案修改後再匯入）`);
+
+    const rows = table.slice(1).map((r) => ({
+      item_id: r[col('品項ID')],
+      spec: r[col('規格')] ?? '',
+      list_price: r[col('牌價')] ?? '',
+      group_name: r[col('折扣群組')] ?? '',
+    }));
+    if (!confirm(`即將匯入 ${rows.length} 列牌價資料，CSV 裡的牌價與折扣群組會覆蓋系統現有設定，確定嗎？`)) return;
+
+    const result = await Api.post('/api/admin/item-prices/import', { rows }, true);
+    let msg = `已更新 ${result.updated} 列`;
+    if (result.created_groups.length) msg += `\n自動新增折扣群組：${result.created_groups.join('、')}`;
+    if (result.skipped.length) msg += `\n\n略過 ${result.skipped.length} 列：\n${result.skipped.slice(0, 20).join('\n')}${result.skipped.length > 20 ? '\n…' : ''}`;
+    alert(msg);
+    loadCatalogManagement();
+    loadPricingPanel();
   } catch (err) {
     showToast(err.message, 'error');
   }
@@ -470,6 +609,156 @@ async function submitSiteForm(e) {
   } catch (err) {
     showToast(err.message, 'error');
   }
+}
+
+// ============================================================
+// 廠商 / 折扣群組 / 每月折數
+// ============================================================
+function bindPricingPanel() {
+  document.getElementById('add-vendor-btn').addEventListener('click', () => addNameEntry('vendors', 'new-vendor-name'));
+  document.getElementById('add-group-btn').addEventListener('click', () => addNameEntry('discount-groups', 'new-group-name'));
+  document.getElementById('new-vendor-name').addEventListener('keydown', (e) => { if (e.key === 'Enter') addNameEntry('vendors', 'new-vendor-name'); });
+  document.getElementById('new-group-name').addEventListener('keydown', (e) => { if (e.key === 'Enter') addNameEntry('discount-groups', 'new-group-name'); });
+
+  const monthInput = document.getElementById('disc-month');
+  monthInput.value = currentTaipeiMonth();
+  monthInput.addEventListener('change', loadDiscountGrid);
+  document.getElementById('disc-save-btn').addEventListener('click', saveDiscountGrid);
+}
+
+function currentTaipeiMonth() {
+  return new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Taipei', year: 'numeric', month: '2-digit' }).format(new Date()).slice(0, 7);
+}
+
+async function loadPricingPanel() {
+  try {
+    [vendors, discountGroups] = await Promise.all([
+      Api.get('/api/admin/vendors', true),
+      Api.get('/api/admin/discount-groups', true),
+    ]);
+    renderNameList('vendor-list', vendors, 'vendors', '筆訂單');
+    renderNameList('group-list', discountGroups, 'discount-groups', '個規格');
+    await loadDiscountGrid();
+  } catch (err) {
+    showToast(err.message, 'error');
+  }
+}
+
+function renderNameList(containerId, list, apiPath, usageUnit) {
+  const box = document.getElementById(containerId);
+  if (!list.length) {
+    box.innerHTML = '<p class="small-note">還沒有資料，先在上面新增。</p>';
+    return;
+  }
+  box.innerHTML = list.map((x) => `
+    <span class="tag-pill name-pill" data-sort-id="${x.id}">
+      ${escapeHtml(x.name)} <span class="usage">${x.usage_count} ${usageUnit}</span>
+      <button data-rename="${x.id}" title="改名">✎</button>
+      <button data-remove="${x.id}" title="刪除">×</button>
+    </span>`).join('');
+
+  enableDragSort(box, '.tag-pill[data-sort-id]', 'x', async (ids) => {
+    await saveOrder(apiPath === 'vendors' ? 'vendors' : 'discount_groups', ids);
+    loadPricingPanel();
+  });
+
+  box.querySelectorAll('[data-rename]').forEach((btn) => btn.addEventListener('click', async () => {
+    const cur = list.find((x) => x.id === +btn.dataset.rename);
+    const name = prompt('新名稱：', cur.name);
+    if (!name || !name.trim() || name.trim() === cur.name) return;
+    try {
+      await Api.put(`/api/admin/${apiPath}/${cur.id}`, { name: name.trim() }, true);
+      showToast('已改名', 'success');
+      loadPricingPanel();
+      loadCatalogManagement();
+    } catch (err) { showToast(err.message, 'error'); }
+  }));
+
+  box.querySelectorAll('[data-remove]').forEach((btn) => btn.addEventListener('click', async () => {
+    const cur = list.find((x) => x.id === +btn.dataset.remove);
+    const warn = apiPath === 'vendors'
+      ? `刪除廠商「${cur.name}」會一併刪除它所有月份的折數設定（已存的訂單報價不受影響），確定嗎？`
+      : `刪除折扣群組「${cur.name}」會刪除所有月份的折數，${cur.usage_count} 個規格會變成「未指定群組」，確定嗎？`;
+    if (!confirm(warn)) return;
+    try {
+      await Api.del(`/api/admin/${apiPath}/${cur.id}`, true);
+      showToast('已刪除', 'success');
+      loadPricingPanel();
+      loadCatalogManagement();
+    } catch (err) { showToast(err.message, 'error'); }
+  }));
+}
+
+async function addNameEntry(apiPath, inputId) {
+  const input = document.getElementById(inputId);
+  const name = input.value.trim();
+  if (!name) return;
+  try {
+    await Api.post(`/api/admin/${apiPath}`, { name }, true);
+    input.value = '';
+    showToast('已新增', 'success');
+    loadPricingPanel();
+    if (apiPath === 'discount-groups') loadCatalogManagement();
+  } catch (err) { showToast(err.message, 'error'); }
+}
+
+async function loadDiscountGrid() {
+  const grid = document.getElementById('disc-grid');
+  const status = document.getElementById('disc-status');
+  const month = document.getElementById('disc-month').value;
+  if (!month) return;
+  if (!vendors.length || !discountGroups.length) {
+    grid.innerHTML = '<p class="small-note">請先在上方建立至少一個廠商與一個折扣群組。</p>';
+    status.textContent = '';
+    return;
+  }
+  try {
+    const data = await Api.get(`/api/admin/discounts?month=${month}`, true);
+    const find = (g, v) => data.entries.find((e) => e.group_id === g && e.vendor_id === v);
+    const ownCount = data.entries.filter((e) => !e.inherited).length;
+    const inheritedCount = data.entries.length - ownCount;
+    status.textContent = ownCount
+      ? `本月已設定 ${ownCount} 格${inheritedCount ? `，另有 ${inheritedCount} 格沿用前月` : ''}`
+      : (inheritedCount ? `⚠️ ${month} 尚未儲存，畫面數字沿用前面月份` : `${month} 尚無任何折數`);
+
+    grid.innerHTML = `
+      <table class="disc-table">
+        <thead><tr><th>折扣群組 ＼ 廠商</th>${vendors.map((v) => `<th>${escapeHtml(v.name)}</th>`).join('')}</tr></thead>
+        <tbody>
+          ${discountGroups.map((g) => `<tr>
+            <td>${escapeHtml(g.name)}</td>
+            ${vendors.map((v) => {
+              const e = find(g.id, v.id);
+              const title = e && e.inherited ? `沿用 ${e.month}` : '';
+              return `<td><input type="text" inputmode="decimal" class="mini-input disc-cell ${e && e.inherited ? 'inherited' : ''}"
+                data-group="${g.id}" data-vendor="${v.id}" value="${e ? e.discount : ''}" title="${title}" placeholder="—"></td>`;
+            }).join('')}
+          </tr>`).join('')}
+        </tbody>
+      </table>`;
+    grid.querySelectorAll('.disc-cell').forEach((inp) => inp.addEventListener('input', () => inp.classList.remove('inherited')));
+  } catch (err) {
+    grid.innerHTML = `<p class="small-note">${escapeHtml(err.message)}</p>`;
+  }
+}
+
+async function saveDiscountGrid() {
+  const month = document.getElementById('disc-month').value;
+  const cells = [...document.querySelectorAll('#disc-grid .disc-cell')];
+  if (!month || !cells.length) return;
+  for (const c of cells) {
+    const v = c.value.trim();
+    if (v && !(Number(v) > 0 && Number(v) <= 1.5)) {
+      c.focus();
+      return showToast(`折數「${v}」不正確，請填小數（75 折填 0.75）`, 'error');
+    }
+  }
+  const entries = cells.map((c) => ({ group_id: +c.dataset.group, vendor_id: +c.dataset.vendor, discount: c.value.trim() }));
+  try {
+    await Api.put('/api/admin/discounts', { month, entries }, true);
+    showToast(`${month} 折數已儲存`, 'success');
+    loadDiscountGrid();
+  } catch (err) { showToast(err.message, 'error'); }
 }
 
 // ============================================================
@@ -576,7 +865,7 @@ function renderPricingBlock(o) {
       ? Number(it.unit_price) * it.quantity : null;
     return `
       <tr>
-        <td>${escapeHtml(it.item_name)} ${[it.spec, it.color].filter(Boolean).map(escapeHtml).join(' / ')}</td>
+        <td>${escapeHtml(it.item_name)} ${[it.spec, it.color].filter(Boolean).map(escapeHtml).join(' / ')}<div class="price-hint" data-item="${it.id}"></div></td>
         <td style="text-align:center;">${it.quantity} ${escapeHtml(it.unit || '')}</td>
         <td><input type="number" step="0.01" min="0" class="price-list" data-item="${it.id}" value="${it.list_price ?? ''}" placeholder="牌價" style="width:90px; padding:4px 6px; border:1px solid var(--border); border-radius:5px; background:var(--surface-sunken);"></td>
         <td><input type="number" step="0.01" min="0" max="1" class="price-disc" data-item="${it.id}" value="${it.discount ?? ''}" placeholder="0.75" style="width:70px; padding:4px 6px; border:1px solid var(--border); border-radius:5px; background:var(--surface-sunken);"></td>
@@ -602,8 +891,9 @@ function renderPricingBlock(o) {
           <tbody>${rows}</tbody>
         </table>
       </div>
+      <button class="btn btn-secondary btn-sm autofill-pricing-btn" data-id="${o.id}" style="margin-top:8px;">📥 依牌價＋廠商折數帶入</button>
       <button class="btn btn-primary btn-sm save-pricing-btn" data-id="${o.id}" style="margin-top:8px;">儲存報價</button>
-      <p class="small-note">單價 = 牌價 × 折數，由系統自動計算。折數請填小數，例如 75 折填 0.75、9 折填 0.9。</p>
+      <p class="small-note">先在上方選好廠商，按「帶入」會依品項牌價與該廠商在下單月份的折數自動填入；確認或修改後按「儲存報價」才會存檔。單價 = 牌價 × 折數。</p>
     </details>
   `;
 }
@@ -625,7 +915,12 @@ async function loadHistoryPanel() {
   if (to) params.set('to', to);
 
   try {
-    let orders = await Api.get(`/api/orders?${params.toString()}`, true);
+    const [orderList, vendorList] = await Promise.all([
+      Api.get(`/api/admin/orders?${params.toString()}`, true),
+      Api.get('/api/admin/vendors', true),
+    ]);
+    vendors = vendorList;
+    let orders = orderList;
     if (status) orders = orders.filter((o) => (o.status || 'submitted') === status);
 
     if (!orders.length) {
@@ -670,7 +965,11 @@ async function loadHistoryPanel() {
         ` : ''}
 
         <div class="ticket-row" style="margin-top:10px; gap:8px; align-items:center; flex-wrap:wrap;">
-          <input type="text" class="vendor-input" data-id="${o.id}" placeholder="廠商（採購填寫）" value="${escapeAttr(o.vendor || '')}" style="flex:1; min-width:140px; padding:6px 9px; border:1px solid var(--border); border-radius:6px; background:var(--surface-sunken);">
+          <select class="vendor-input mini-input" data-id="${o.id}" data-saved="${o.vendor_id || ''}" style="flex:1; min-width:160px;">
+            <option value="">— 選擇廠商 —</option>
+            ${!o.vendor_id && o.vendor ? `<option value="" selected>${escapeHtml(o.vendor)}（舊資料，請重新選擇）</option>` : ''}
+            ${vendors.map((v) => `<option value="${v.id}" ${v.id === o.vendor_id ? 'selected' : ''}>${escapeHtml(v.name)}</option>`).join('')}
+          </select>
           <button class="btn btn-secondary btn-sm save-vendor-btn" data-id="${o.id}">儲存廠商</button>
         </div>
 
@@ -695,7 +994,9 @@ function bindHistoryActions(list) {
   list.querySelectorAll('.save-vendor-btn').forEach((btn) => btn.addEventListener('click', async () => {
     const input = list.querySelector(`.vendor-input[data-id="${btn.dataset.id}"]`);
     try {
-      await Api.put(`/api/admin/orders/${btn.dataset.id}/vendor`, { vendor: input.value.trim() }, true);
+      if (!input.value) return showToast('請先從清單選擇廠商', 'error');
+      await Api.put(`/api/admin/orders/${btn.dataset.id}/vendor`, { vendor_id: +input.value }, true);
+      input.dataset.saved = input.value;
       showToast('廠商已更新', 'success');
     } catch (err) { showToast(err.message, 'error'); }
   }));
@@ -745,6 +1046,40 @@ function bindHistoryActions(list) {
     table.querySelectorAll('.price-list, .price-disc').forEach((inp) => inp.addEventListener('input', recalc));
   });
 
+  list.querySelectorAll('.autofill-pricing-btn').forEach((btn) => btn.addEventListener('click', async () => {
+    const id = btn.dataset.id;
+    const select = list.querySelector(`.vendor-input[data-id="${id}"]`);
+    if (!select.value) return showToast('請先在上方選擇廠商', 'error');
+    const table = list.querySelector(`.pricing-table[data-id="${id}"]`);
+    const hasExisting = [...table.querySelectorAll('.price-list, .price-disc')].some((inp) => inp.value !== '');
+    if (hasExisting && !confirm('帶入會覆蓋目前表格裡已填的牌價與折數（尚未儲存前都可以再改），確定嗎？')) return;
+    try {
+      // 選了但還沒存的廠商，順便存起來，避免報價跟廠商對不上
+      if (select.dataset.saved !== select.value) {
+        await Api.put(`/api/admin/orders/${id}/vendor`, { vendor_id: +select.value }, true);
+        select.dataset.saved = select.value;
+      }
+      const result = await Api.get(`/api/admin/orders/${id}/price-suggest?vendor_id=${select.value}`, true);
+      let problems = 0;
+      result.items.forEach((s) => {
+        const listInp = table.querySelector(`.price-list[data-item="${s.id}"]`);
+        const discInp = table.querySelector(`.price-disc[data-item="${s.id}"]`);
+        const hint = table.querySelector(`.price-hint[data-item="${s.id}"]`);
+        if (!listInp) return;
+        listInp.value = s.list_price ?? '';
+        discInp.value = s.discount ?? '';
+        const notes = [];
+        if (s.group_name) notes.push(s.group_name);
+        if (s.discount_month && s.discount_month !== result.order_month) notes.push(`沿用 ${s.discount_month} 折數`);
+        if (s.problem) { notes.push(`⚠️ ${s.problem}`); problems++; }
+        hint.textContent = notes.join('・');
+        hint.classList.toggle('warn', !!s.problem);
+      });
+      listInpDispatch(table);
+      showToast(problems ? `已帶入，${problems} 項需要手動補填` : '已帶入，確認後請按「儲存報價」', problems ? 'error' : 'success');
+    } catch (err) { showToast(err.message, 'error'); }
+  }));
+
   list.querySelectorAll('.save-pricing-btn').forEach((btn) => btn.addEventListener('click', async () => {
     const table = list.querySelector(`.pricing-table[data-id="${btn.dataset.id}"]`);
     const items = [...table.querySelectorAll('tbody tr')].map((tr) => ({
@@ -757,6 +1092,12 @@ function bindHistoryActions(list) {
       showToast('報價已儲存', 'success');
     } catch (err) { showToast(err.message, 'error'); }
   }));
+}
+
+// 帶入後觸發一次 input 事件，讓單價、小計、總計重新計算
+function listInpDispatch(table) {
+  const first = table.querySelector('.price-list');
+  if (first) first.dispatchEvent(new Event('input'));
 }
 
 async function exportCsv() {

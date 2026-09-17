@@ -12,9 +12,20 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 
   try {
-    const order = await Api.get(`/api/orders/${id}`);
-    // mode=internal 內部核簽單（含價格）；其他一律當成 vendor 廠商訂購單（不含價格）
+    // mode=internal 內部核簽單（含價格）：必須是管理員，改走後台 API，沒有權限就不顯示
+    // 其他一律當成 vendor 廠商訂購單（不含價格），走前台 API（前台 API 本身就不回傳價格）
     const showPrice = params.get('mode') === 'internal';
+    let order;
+    if (showPrice) {
+      try {
+        order = await Api.get(`/api/admin/orders/${id}`, true);
+      } catch (e) {
+        root.innerHTML = `<p style="text-align:center; padding:40px;">內部核簽單需要管理員權限，請先登入管理後台，再從後台的歷史紀錄點「內部核簽單」開啟。</p>`;
+        return;
+      }
+    } else {
+      order = await Api.get(`/api/orders/${id}`);
+    }
     document.title = showPrice ? '列印訂購單（內部核簽）' : '列印訂購單（廠商）';
     if (showPrice) root.classList.add('with-price');
     root.innerHTML = renderPrintHtml(order, showPrice);

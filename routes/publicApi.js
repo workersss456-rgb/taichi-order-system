@@ -176,7 +176,7 @@ router.post('/orders', async (req, res) => {
     delete order.need_date_fmt;
     const orderItems = (await pool.query('SELECT * FROM order_items WHERE order_id = $1', [orderId])).rows;
 
-    res.status(201).json({ ...order, items: orderItems });
+    res.status(201).json({ ...order, items: orderItems.map(publicItem) });
   } catch (err) {
     await client.query('ROLLBACK');
     console.error(err);
@@ -186,7 +186,19 @@ router.post('/orders', async (req, res) => {
   }
 });
 
-// ---------- 單筆叫料單查詢（列印單據用） ----------
+// ---------- 前台資料過濾 ----------
+// 牌價/折數/單價是內部成本資訊，前台 API 一律不回傳（內部核簽單改走 /api/admin/orders/:id）
+function publicItem(item) {
+  const { list_price, discount, unit_price, ...rest } = item;
+  return rest;
+}
+// 訂購人 Email 不對其他使用者公開
+function publicOrder(order) {
+  const { email, ...rest } = order;
+  return rest;
+}
+
+// ---------- 單筆叫料單查詢（前台列印廠商訂購單用，不含價格） ----------
 router.get('/orders/:id', async (req, res) => {
   try {
     const order = (await pool.query(
@@ -200,7 +212,7 @@ router.get('/orders/:id', async (req, res) => {
     order.need_date = order.need_date_fmt;
     delete order.need_date_fmt;
     const items = (await pool.query('SELECT * FROM order_items WHERE order_id = $1 ORDER BY id', [order.id])).rows;
-    res.json({ ...order, items });
+    res.json({ ...publicOrder(order), items: items.map(publicItem) });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: '查詢叫料單失敗' });
@@ -232,8 +244,8 @@ router.get('/orders', async (req, res) => {
 
     const result = [];
     for (const o of orders) {
-      const items = (await pool.query('SELECT * FROM order_items WHERE order_id = $1', [o.id])).rows;
-      result.push({ ...o, items });
+      const items = (await pool.query('SELECT * FROM order_items WHERE order_id = $1 ORDER BY id', [o.id])).rows;
+      result.push({ ...publicOrder(o), items: items.map(publicItem) });
     }
     res.json(result);
   } catch (err) {
@@ -246,7 +258,7 @@ router.get('/orders', async (req, res) => {
 // 無異常 → 直接結案；有異常 → 填寫問題描述，拋轉回採購處理
 router.put('/orders/:id/receive', async (req, res) => {
   try {
-    const { has_issue, issue_note } = req.body;
+    const { has_issue, issue_note, issue_item_ids } = req.body;
 
     const current = (await pool.query('SELECT status FROM orders WHERE id = $1', [req.params.id])).rows[0];
     if (!current) return res.status(404).json({ error: '找不到這筆叫料單' });
@@ -256,6 +268,12 @@ router.put('/orders/:id/receive', async (req, res) => {
     if (has_issue) {
       if (!issue_note || !issue_note.trim()) {
         return res.status(400).json({ error: '請填寫異常的問題描述' });
+      }
+      if (Array.isArray(issue_item_ids) && issue_item_ids.length) {
+        await pool.query(
+          'UPDATE order_items SET has_issue = true WHERE order_id = $1 AND id = ANY($2::int[])',
+          [req.params.id, issue_item_ids]
+        );
       }
       row = (await pool.query(
         `UPDATE orders SET status = 'issue', issue_note = $1, received_at = NOW() WHERE id = $2
@@ -276,7 +294,7 @@ router.put('/orders/:id/receive', async (req, res) => {
         .catch((err) => console.error('結案通知失敗：', err.message));
     }
 
-    res.json(row);
+    res.json(publicOrder(row));
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: '更新收貨狀態失敗' });

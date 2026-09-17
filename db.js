@@ -11,7 +11,8 @@ if (!connectionString) {
 
 const pool = new Pool({
   connectionString,
-  ssl: { rejectUnauthorized: false }, // Neon 需要 SSL 連線
+  // Neon 需要 SSL 連線；本機測試用的 localhost 資料庫則不用
+  ssl: /@(localhost|127\.0\.0\.1)[:/]/.test(connectionString || '') ? false : { rejectUnauthorized: false },
 });
 
 // ---------- 建立資料表（如果還不存在的話） ----------
@@ -78,7 +79,8 @@ async function createTables() {
       note TEXT,
       list_price NUMERIC(12,2),
       discount NUMERIC(6,4),
-      unit_price NUMERIC(12,2)
+      unit_price NUMERIC(12,2),
+      has_issue BOOLEAN DEFAULT false
     );
 
     CREATE TABLE IF NOT EXISTS sites (
@@ -141,6 +143,45 @@ async function createTables() {
     ALTER TABLE order_items ADD COLUMN IF NOT EXISTS list_price NUMERIC(12,2);
     ALTER TABLE order_items ADD COLUMN IF NOT EXISTS discount NUMERIC(6,4);
     ALTER TABLE order_items ADD COLUMN IF NOT EXISTS unit_price NUMERIC(12,2);
+    ALTER TABLE order_items ADD COLUMN IF NOT EXISTS has_issue BOOLEAN DEFAULT false;
+  `);
+
+  // ---------- 牌價 / 廠商 / 每月折數 ----------
+  // 牌價：固定在「品項 × 規格」上（沒有規格的品項，spec 存空字串）
+  // 折數：「折扣群組 × 廠商 × 月份」，每月輸入一次；當月沒填就沿用最近一個有填的月份
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS vendors (
+      id SERIAL PRIMARY KEY,
+      name TEXT NOT NULL UNIQUE,
+      sort_order INTEGER DEFAULT 0
+    );
+
+    CREATE TABLE IF NOT EXISTS discount_groups (
+      id SERIAL PRIMARY KEY,
+      name TEXT NOT NULL UNIQUE,
+      sort_order INTEGER DEFAULT 0
+    );
+
+    CREATE TABLE IF NOT EXISTS item_prices (
+      id SERIAL PRIMARY KEY,
+      item_id INTEGER NOT NULL REFERENCES items(id) ON DELETE CASCADE,
+      spec TEXT NOT NULL DEFAULT '',
+      list_price NUMERIC(12,2),
+      group_id INTEGER REFERENCES discount_groups(id) ON DELETE SET NULL,
+      UNIQUE (item_id, spec)
+    );
+
+    CREATE TABLE IF NOT EXISTS monthly_discounts (
+      id SERIAL PRIMARY KEY,
+      group_id INTEGER NOT NULL REFERENCES discount_groups(id) ON DELETE CASCADE,
+      vendor_id INTEGER NOT NULL REFERENCES vendors(id) ON DELETE CASCADE,
+      month TEXT NOT NULL,
+      discount NUMERIC(6,4) NOT NULL,
+      updated_at TIMESTAMPTZ DEFAULT NOW(),
+      UNIQUE (group_id, vendor_id, month)
+    );
+
+    ALTER TABLE orders ADD COLUMN IF NOT EXISTS vendor_id INTEGER REFERENCES vendors(id) ON DELETE SET NULL;
   `);
 }
 

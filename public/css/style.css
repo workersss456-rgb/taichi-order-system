@@ -529,13 +529,15 @@ a { color: var(--primary); }
 .table th, .table td { text-align: left; padding: 12px 16px; font-size: 13.5px; border-bottom: 1px solid var(--border); word-break: break-word; }
 .table th { background: var(--surface-sunken); color: var(--text-secondary); font-weight: 700; font-size: 12px; text-transform: uppercase; letter-spacing: .03em; }
 .table tr:last-child td { border-bottom: none; }
+#items-table { min-width: 900px; }
 #items-table th:nth-child(1), #items-table td:nth-child(1) { width: 90px; }
-#items-table th:nth-child(2) { width: 20%; }
-#items-table th:nth-child(3) { width: 16%; }
-#items-table th:nth-child(4) { width: 18%; }
-#items-table th:nth-child(5) { width: 14%; }
-#items-table th:nth-child(6) { width: 10%; }
-#items-table th:nth-child(7) { width: 160px; }
+#items-table th:nth-child(2) { width: 18%; }
+#items-table th:nth-child(3) { width: 13%; }
+#items-table th:nth-child(4) { width: 15%; }
+#items-table th:nth-child(5) { width: 10%; }
+#items-table th:nth-child(6) { width: 14%; }
+#items-table th:nth-child(7) { width: 90px; }
+#items-table th:nth-child(8) { width: 150px; }
 .table td { vertical-align: middle; }
 /* 操作欄維持表格儲存格（不可用 display:flex，否則會脫離欄位對齊） */
 .table td.actions { white-space: nowrap; }
@@ -576,3 +578,25 @@ a { color: var(--primary); }
   .qty-stepper input { width: 30px; font-size: 12.5px; }
   .item-controls .btn { font-size: 12px; padding: 7px 6px; }
 }
+
+/* ---------- 牌價 / 每月折數 ---------- */
+.mini-input { padding: 7px 9px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface-sunken); font-size: 13px; }
+.pricing-lists { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+@media (max-width: 860px) { .pricing-lists { grid-template-columns: 1fr; } }
+.name-pill .usage { color: var(--text-faint); font-size: 11.5px; }
+.name-pill button { border: none; background: none; color: var(--text-faint); font-weight: 700; cursor: pointer; padding: 0 2px; }
+.price-editor-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.price-editor-table th, .price-editor-table td { padding: 6px 8px; border-bottom: 1px solid var(--border); text-align: left; }
+.price-editor-table th { color: var(--text-secondary); font-size: 12px; font-weight: 700; }
+.price-editor-table input, .price-editor-table select { width: 100%; }
+.disc-table { border-collapse: collapse; font-size: 13px; min-width: 100%; }
+.disc-table th, .disc-table td { border: 1px solid var(--border); padding: 6px 8px; text-align: center; white-space: nowrap; }
+.disc-table th { background: var(--surface-sunken); color: var(--text-secondary); font-size: 12px; }
+.disc-table td:first-child, .disc-table th:first-child { text-align: left; position: sticky; left: 0; background: var(--surface); }
+.disc-table th:first-child { background: var(--surface-sunken); }
+.disc-table input { width: 72px; text-align: center; }
+.disc-table input.inherited { color: var(--text-faint); font-style: italic; }
+.price-range { font-variant-numeric: tabular-nums; }
+.price-missing { color: var(--danger); font-size: 12px; }
+.price-hint { font-size: 11.5px; color: var(--text-faint); margin-top: 2px; }
+.price-hint.warn { color: var(--danger); }

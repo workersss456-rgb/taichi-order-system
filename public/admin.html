@@ -30,6 +30,7 @@
   <aside class="admin-sidebar">
     <div class="brand"><span class="brand-mark">叫</span>管理後台</div>
     <button class="admin-nav-item active" data-panel="items">品項管理</button>
+    <button class="admin-nav-item" data-panel="pricing">廠商 / 每月折數</button>
     <button class="admin-nav-item" data-panel="sites">案場管理</button>
     <button class="admin-nav-item" data-panel="special">特殊採購審核</button>
     <button class="admin-nav-item" data-panel="history">叫料歷史紀錄</button>
@@ -55,7 +56,12 @@
       <div class="card">
         <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:14px; flex-wrap:wrap; gap:10px;">
           <h3 style="font-size:14px;">品項清單</h3>
-          <button class="btn btn-primary btn-sm" id="new-item-btn">＋ 新增品項</button>
+          <div style="display:flex; gap:8px; flex-wrap:wrap;">
+            <button class="btn btn-secondary btn-sm" id="price-export-btn">⬇ 匯出牌價 CSV</button>
+            <button class="btn btn-secondary btn-sm" id="price-import-btn">⬆ 匯入牌價 CSV</button>
+            <input type="file" id="price-import-file" accept=".csv,text/csv" style="display:none;">
+            <button class="btn btn-primary btn-sm" id="new-item-btn">＋ 新增品項</button>
+          </div>
         </div>
         <div style="display:flex; gap:10px; margin-bottom:8px; flex-wrap:wrap;">
           <select id="filter-cat" style="padding:8px 10px; border:1px solid var(--border); border-radius:6px; background:var(--surface-sunken); min-width:160px;">
@@ -68,7 +74,7 @@
         <p class="small-note" style="margin-bottom:14px;">💡 篩選到單一子分類時，品項列可以直接拖曳調整順序。</p>
         <div style="overflow-x:auto;">
           <table class="table" id="items-table">
-            <thead><tr><th>圖片</th><th>名稱</th><th>子分類</th><th>規格</th><th>顏色</th><th>狀態</th><th>操作</th></tr></thead>
+            <thead><tr><th>圖片</th><th>名稱</th><th>子分類</th><th>規格</th><th>顏色</th><th>牌價</th><th>狀態</th><th>操作</th></tr></thead>
             <tbody id="items-tbody"></tbody>
           </table>
         </div>
@@ -83,7 +89,12 @@
           <div class="field"><label>圖片網址</label><input type="text" id="item-image" placeholder="https://…"></div>
           <div class="field"><label>說明（選填）</label><input type="text" id="item-desc"></div>
           <div class="field"><label>單位</label><input type="text" id="item-unit" value="個"></div>
-          <div class="field"><label>規格選項（用逗號分隔，沒有可留空）</label><input type="text" id="item-specs" placeholder="例如：S, M, L"></div>
+          <div class="field"><label>規格選項（用逗號分隔，沒有可留空）</label><input type="text" id="item-specs" placeholder="例如：1.0, 2.0, 3.5"></div>
+          <div class="field">
+            <label>牌價設定（每個規格各自一組牌價與折扣群組）</label>
+            <div id="item-price-editor"></div>
+            <p class="small-note">折扣群組決定這個規格套用哪一組每月折數，群組請到左側「廠商 / 每月折數」建立。</p>
+          </div>
           <div class="field"><label>顏色選項（用逗號分隔，沒有可留空）</label><input type="text" id="item-colors" placeholder="例如：黑, 白, 藍"></div>
           <div class="field"><label>排序（數字越小越前面）</label><input type="number" id="item-sort" value="0"></div>
           <div class="field"><label><input type="checkbox" id="item-active" checked style="width:auto; margin-right:6px;">上架中（取消勾選 = 從商城下架，但不影響歷史紀錄）</label></div>
@@ -92,6 +103,41 @@
             <button type="button" class="btn btn-secondary" id="item-form-cancel">取消</button>
           </div>
         </form>
+      </div>
+    </section>
+
+    <!-- ---- 廠商 / 每月折數 ---- -->
+    <section class="admin-panel" id="panel-pricing">
+      <div class="section-title"><div><span class="eyebrow">Pricing</span><h2>廠商 / 折扣群組 / 每月折數</h2></div></div>
+      <p class="small-note" style="margin-bottom:14px;">牌價固定設定在品項規格上；折數依「折扣群組 × 廠商」每月輸入一次。當月沒填的格子會沿用最近一個月的數字。</p>
+
+      <div class="pricing-lists">
+        <div class="card">
+          <h3 style="font-size:14px; margin-bottom:12px;">廠商清單</h3>
+          <div style="display:flex; gap:8px; margin-bottom:12px;">
+            <input type="text" id="new-vendor-name" class="mini-input" placeholder="新廠商名稱" style="flex:1;">
+            <button class="btn btn-secondary btn-sm" id="add-vendor-btn">新增</button>
+          </div>
+          <div id="vendor-list" class="tag-input-list"></div>
+        </div>
+        <div class="card">
+          <h3 style="font-size:14px; margin-bottom:12px;">折扣群組</h3>
+          <div style="display:flex; gap:8px; margin-bottom:12px;">
+            <input type="text" id="new-group-name" class="mini-input" placeholder="例如：電線-細線、PVC 管" style="flex:1;">
+            <button class="btn btn-secondary btn-sm" id="add-group-btn">新增</button>
+          </div>
+          <div id="group-list" class="tag-input-list"></div>
+        </div>
+      </div>
+
+      <div class="card" style="margin-top:20px;">
+        <div style="display:flex; align-items:flex-end; gap:12px; flex-wrap:wrap; margin-bottom:12px;">
+          <div class="field" style="margin:0;"><label>月份</label><input type="month" id="disc-month" class="mini-input"></div>
+          <button class="btn btn-primary btn-sm" id="disc-save-btn">儲存本月折數</button>
+          <span class="small-note" id="disc-status" style="margin:0;"></span>
+        </div>
+        <div style="overflow-x:auto;" id="disc-grid"></div>
+        <p class="small-note">折數請填小數：75 折填 0.75。灰色斜體是沿用前面月份的數字，按「儲存本月折數」會把畫面上所有數字存成這個月的設定；清空格子再儲存，代表本月不設定。</p>
       </div>
     </section>
 

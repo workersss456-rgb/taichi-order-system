@@ -98,10 +98,13 @@ router.get('/items', async (req, res) => {
   try {
     // 管理後台要看到所有品項，包含下架的
     const items = (await pool.query('SELECT * FROM items ORDER BY sort_order, id')).rows;
+    const priceRows = (await pool.query('SELECT item_id, spec, list_price, group_id FROM item_prices')).rows;
     res.json(items.map((it) => ({
       ...it,
       specs: JSON.parse(it.specs || '[]'),
       colors: JSON.parse(it.colors || '[]'),
+      prices: priceRows.filter((p) => p.item_id === it.id)
+        .map((p) => ({ spec: p.spec, list_price: p.list_price, group_id: p.group_id })),
     })));
   } catch (err) {
     console.error(err);
@@ -123,6 +126,7 @@ router.post('/items', async (req, res) => {
         JSON.stringify(specs || []), JSON.stringify(colors || []), sort_order || 0,
       ]
     )).rows[0];
+    await saveItemPrices(item.id, specs || [], req.body.prices);
     res.status(201).json({ ...item, specs: JSON.parse(item.specs), colors: JSON.parse(item.colors) });
   } catch (err) {
     console.error(err);
@@ -143,12 +147,46 @@ router.put('/items/:id', async (req, res) => {
         req.params.id,
       ]
     )).rows[0];
+    if (!item) return res.status(404).json({ error: '找不到這個品項' });
+    await saveItemPrices(item.id, specs || [], req.body.prices);
     res.json({ ...item, specs: JSON.parse(item.specs), colors: JSON.parse(item.colors) });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: '更新品項失敗' });
   }
 });
+
+// 儲存品項的牌價設定：每個規格一組（牌價、折扣群組）；沒有規格的品項用空字串當規格
+// prices 沒傳（undefined）代表這次沒有要改價格，不動既有資料
+async function saveItemPrices(itemId, specs, prices) {
+  if (!Array.isArray(prices)) return;
+  const validSpecs = specs.length ? specs : [''];
+  await pool.query(
+    'DELETE FROM item_prices WHERE item_id = $1 AND NOT (spec = ANY($2::text[]))',
+    [itemId, validSpecs]
+  );
+  for (const p of prices) {
+    const spec = String(p.spec ?? '');
+    if (!validSpecs.includes(spec)) continue;
+    const listPrice = toNumberOrNull(p.list_price);
+    const groupId = p.group_id ? Number(p.group_id) : null;
+    if (listPrice === null && groupId === null) {
+      await pool.query('DELETE FROM item_prices WHERE item_id = $1 AND spec = $2', [itemId, spec]);
+      continue;
+    }
+    await pool.query(
+      `INSERT INTO item_prices (item_id, spec, list_price, group_id) VALUES ($1,$2,$3,$4)
+       ON CONFLICT (item_id, spec) DO UPDATE SET list_price = EXCLUDED.list_price, group_id = EXCLUDED.group_id`,
+      [itemId, spec, listPrice, groupId]
+    );
+  }
+}
+
+function toNumberOrNull(v) {
+  if (v === '' || v === null || v === undefined) return null;
+  const n = Number(String(v).replace(/,/g, ''));
+  return Number.isFinite(n) ? n : null;
+}
 
 router.delete('/items/:id', async (req, res) => {
   try {
@@ -165,7 +203,7 @@ router.delete('/items/:id', async (req, res) => {
 // 依陣列順序把 sort_order 重新編號成 1, 2, 3…，使用者就不用自己記數字。
 router.put('/reorder', async (req, res) => {
   const { type, ids } = req.body;
-  const allowed = { categories: 'categories', subcategories: 'subcategories', items: 'items', sites: 'sites' };
+  const allowed = { categories: 'categories', subcategories: 'subcategories', items: 'items', sites: 'sites', vendors: 'vendors', discount_groups: 'discount_groups' };
   const table = allowed[type];
   if (!table) return res.status(400).json({ error: '排序對象不正確' });
   if (!Array.isArray(ids) || !ids.length) return res.status(400).json({ error: '沒有收到排序資料' });
@@ -242,10 +280,18 @@ router.delete('/sites/:id', async (req, res) => {
 router.put('/orders/:id/vendor', async (req, res) => {
   try {
     const { vendor } = req.body;
+    // 從廠商清單選的會帶 vendor_id，名稱以清單為準；沒選清單就只存文字（相容舊資料）
+    const vendorId = req.body.vendor_id ? Number(req.body.vendor_id) : null;
+    let vendorName = vendor || '';
+    if (vendorId) {
+      const v = (await pool.query('SELECT name FROM vendors WHERE id = $1', [vendorId])).rows[0];
+      if (!v) return res.status(400).json({ error: '找不到這個廠商' });
+      vendorName = v.name;
+    }
     const row = (await pool.query(
-      `UPDATE orders SET vendor=$1 WHERE id=$2
+      `UPDATE orders SET vendor=$1, vendor_id=$2 WHERE id=$3
        RETURNING *, TO_CHAR(created_at AT TIME ZONE 'Asia/Taipei', 'YYYY-MM-DD HH24:MI:SS') AS created_at_fmt`,
-      [vendor || '', req.params.id]
+      [vendorName, vendorId, req.params.id]
     )).rows[0];
     if (!row) return res.status(404).json({ error: '找不到這筆叫料單' });
     row.created_at = row.created_at_fmt; delete row.created_at_fmt;
@@ -403,5 +449,328 @@ function csvEscape(val) {
   if (/[",\n]/.test(s)) return '"' + s.replace(/"/g, '""') + '"';
   return s;
 }
+
+// ============================================================
+// 廠商 / 折扣群組（名稱清單，兩者結構相同，共用一套 CRUD）
+// ============================================================
+function registerNameList(pathName, table, label) {
+  router.get(`/${pathName}`, async (req, res) => {
+    try {
+      const usageSql = table === 'discount_groups'
+        ? '(SELECT COUNT(*)::int FROM item_prices p WHERE p.group_id = t.id) AS usage_count'
+        : '(SELECT COUNT(*)::int FROM orders o WHERE o.vendor_id = t.id) AS usage_count';
+      const rows = (await pool.query(`SELECT t.*, ${usageSql} FROM ${table} t ORDER BY t.sort_order, t.id`)).rows;
+      res.json(rows);
+    } catch (err) {
+      console.error(err);
+      res.status(500).json({ error: `讀取${label}失敗` });
+    }
+  });
+
+  router.post(`/${pathName}`, async (req, res) => {
+    try {
+      const name = (req.body.name || '').trim();
+      if (!name) return res.status(400).json({ error: `請輸入${label}名稱` });
+      const maxSort = (await pool.query(`SELECT COALESCE(MAX(sort_order),0)::int AS m FROM ${table}`)).rows[0].m;
+      const row = (await pool.query(
+        `INSERT INTO ${table} (name, sort_order) VALUES ($1,$2) RETURNING *`, [name, maxSort + 1]
+      )).rows[0];
+      res.status(201).json(row);
+    } catch (err) {
+      if (err.code === '23505') return res.status(400).json({ error: `已經有同名的${label}了` });
+      console.error(err);
+      res.status(500).json({ error: `新增${label}失敗` });
+    }
+  });
+
+  router.put(`/${pathName}/:id`, async (req, res) => {
+    try {
+      const name = (req.body.name || '').trim();
+      if (!name) return res.status(400).json({ error: `請輸入${label}名稱` });
+      const row = (await pool.query(`UPDATE ${table} SET name=$1 WHERE id=$2 RETURNING *`, [name, req.params.id])).rows[0];
+      if (!row) return res.status(404).json({ error: `找不到這個${label}` });
+      if (table === 'vendors') {
+        await pool.query('UPDATE orders SET vendor = $1 WHERE vendor_id = $2', [name, req.params.id]);
+      }
+      res.json(row);
+    } catch (err) {
+      if (err.code === '23505') return res.status(400).json({ error: `已經有同名的${label}了` });
+      console.error(err);
+      res.status(500).json({ error: `更新${label}失敗` });
+    }
+  });
+
+  router.delete(`/${pathName}/:id`, async (req, res) => {
+    try {
+      await pool.query(`DELETE FROM ${table} WHERE id = $1`, [req.params.id]);
+      res.json({ ok: true });
+    } catch (err) {
+      console.error(err);
+      res.status(500).json({ error: `刪除${label}失敗` });
+    }
+  });
+}
+registerNameList('vendors', 'vendors', '廠商');
+registerNameList('discount-groups', 'discount_groups', '折扣群組');
+
+// ============================================================
+// 每月折數（折扣群組 × 廠商 × 月份）
+// ============================================================
+const MONTH_RE = /^\d{4}-(0[1-9]|1[0-2])$/;
+
+// 查某個月份的折數表：當月有填的回傳 month=該月；沒填的回傳最近一個更早月份的數字（沿用）
+router.get('/discounts', async (req, res) => {
+  try {
+    const { month } = req.query;
+    if (!MONTH_RE.test(month || '')) return res.status(400).json({ error: '月份格式不正確（YYYY-MM）' });
+    const rows = (await pool.query(
+      `SELECT DISTINCT ON (group_id, vendor_id) group_id, vendor_id, month, discount
+       FROM monthly_discounts WHERE month <= $1
+       ORDER BY group_id, vendor_id, month DESC`, [month]
+    )).rows;
+    res.json({ month, entries: rows.map((r) => ({ ...r, discount: Number(r.discount), inherited: r.month !== month })) });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: '讀取折數失敗' });
+  }
+});
+
+// 儲存某月份的折數：entries = [{ group_id, vendor_id, discount }]，discount 空白代表刪除該月設定
+router.put('/discounts', async (req, res) => {
+  const { month, entries } = req.body;
+  if (!MONTH_RE.test(month || '')) return res.status(400).json({ error: '月份格式不正確（YYYY-MM）' });
+  if (!Array.isArray(entries)) return res.status(400).json({ error: '沒有收到折數資料' });
+
+  for (const e of entries) {
+    const d = toNumberOrNull(e.discount);
+    if (d !== null && (d <= 0 || d > 1.5)) {
+      return res.status(400).json({ error: `折數 ${e.discount} 看起來不對，請填小數（75 折填 0.75）` });
+    }
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    for (const e of entries) {
+      const d = toNumberOrNull(e.discount);
+      if (d === null) {
+        await client.query(
+          'DELETE FROM monthly_discounts WHERE group_id=$1 AND vendor_id=$2 AND month=$3',
+          [e.group_id, e.vendor_id, month]
+        );
+      } else {
+        await client.query(
+          `INSERT INTO monthly_discounts (group_id, vendor_id, month, discount) VALUES ($1,$2,$3,$4)
+           ON CONFLICT (group_id, vendor_id, month) DO UPDATE SET discount = EXCLUDED.discount, updated_at = NOW()`,
+          [e.group_id, e.vendor_id, month, d]
+        );
+      }
+    }
+    await client.query('COMMIT');
+    res.json({ ok: true });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error(err);
+    res.status(500).json({ error: '儲存折數失敗' });
+  } finally {
+    client.release();
+  }
+});
+
+// ============================================================
+// 報價自動帶入：依「品項規格的牌價」＋「廠商 × 折扣群組 × 訂單月份的折數」算出建議值
+// 只回傳建議，不寫入；採購確認後按「儲存報價」才會存
+// ============================================================
+router.get('/orders/:id/price-suggest', async (req, res) => {
+  try {
+    const vendorId = Number(req.query.vendor_id);
+    if (!vendorId) return res.status(400).json({ error: '請先選擇廠商' });
+    const order = (await pool.query(
+      `SELECT id, TO_CHAR(created_at AT TIME ZONE 'Asia/Taipei', 'YYYY-MM') AS order_month FROM orders WHERE id = $1`,
+      [req.params.id]
+    )).rows[0];
+    if (!order) return res.status(404).json({ error: '找不到這筆叫料單' });
+
+    const orderItems = (await pool.query('SELECT id, item_id, spec FROM order_items WHERE order_id = $1 ORDER BY id', [order.id])).rows;
+    const suggestions = [];
+    for (const oi of orderItems) {
+      const s = { id: oi.id, list_price: null, discount: null, discount_month: null, group_name: null, problem: null };
+      if (!oi.item_id) { s.problem = '品項已不在目錄'; suggestions.push(s); continue; }
+      const price = (await pool.query(
+        `SELECT p.list_price, p.group_id, g.name AS group_name FROM item_prices p
+         LEFT JOIN discount_groups g ON g.id = p.group_id
+         WHERE p.item_id = $1 AND p.spec = $2`, [oi.item_id, oi.spec || '']
+      )).rows[0];
+      if (!price || price.list_price === null) { s.problem = '尚未設定牌價'; }
+      else { s.list_price = Number(price.list_price); }
+      if (price && price.group_id) {
+        s.group_name = price.group_name;
+        const disc = (await pool.query(
+          `SELECT month, discount FROM monthly_discounts
+           WHERE group_id = $1 AND vendor_id = $2 AND month <= $3 ORDER BY month DESC LIMIT 1`,
+          [price.group_id, vendorId, order.order_month]
+        )).rows[0];
+        if (disc) { s.discount = Number(disc.discount); s.discount_month = disc.month; }
+        else { s.problem = s.problem || `此廠商在「${price.group_name}」尚無折數`; }
+      } else if (price) {
+        s.problem = s.problem || '尚未指定折扣群組';
+      }
+      suggestions.push(s);
+    }
+    res.json({ order_month: order.order_month, items: suggestions });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: '計算建議報價失敗' });
+  }
+});
+
+// ============================================================
+// 牌價 CSV 匯出 / 匯入（第一次建檔、大量調整用）
+// ============================================================
+router.get('/item-prices/export.csv', async (req, res) => {
+  try {
+    const items = (await pool.query(
+      `SELECT i.id, i.name, i.specs, i.unit, s.name AS sub_name, c.name AS cat_name
+       FROM items i JOIN subcategories s ON s.id = i.subcategory_id JOIN categories c ON c.id = s.category_id
+       ORDER BY c.sort_order, c.id, s.sort_order, s.id, i.sort_order, i.id`
+    )).rows;
+    const prices = (await pool.query(
+      `SELECT p.item_id, p.spec, p.list_price, g.name AS group_name FROM item_prices p
+       LEFT JOIN discount_groups g ON g.id = p.group_id`
+    )).rows;
+    const rows = [['品項ID', '分類', '子分類', '品項名稱', '規格', '單位', '牌價', '折扣群組']];
+    for (const it of items) {
+      const specs = JSON.parse(it.specs || '[]');
+      for (const spec of (specs.length ? specs : [''])) {
+        const p = prices.find((x) => x.item_id === it.id && x.spec === spec);
+        rows.push([it.id, it.cat_name, it.sub_name, it.name, spec, it.unit, p?.list_price ?? '', p?.group_name ?? '']);
+      }
+    }
+    const csv = rows.map((r) => r.map(csvEscape).join(',')).join('\n');
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', 'attachment; filename="item-prices.csv"');
+    res.send('\uFEFF' + csv);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: '匯出牌價失敗' });
+  }
+});
+
+// rows = [{ item_id, spec, list_price, group_name }]（前端已把 CSV 解析成物件）
+// 以「品項ID + 規格」對應；折扣群組用名稱對應，不存在的群組會自動建立
+router.post('/item-prices/import', async (req, res) => {
+  const { rows } = req.body;
+  if (!Array.isArray(rows) || !rows.length) return res.status(400).json({ error: 'CSV 裡沒有資料' });
+
+  const client = await pool.connect();
+  const skipped = [];
+  let updated = 0;
+  const createdGroups = [];
+  try {
+    await client.query('BEGIN');
+    const items = (await client.query('SELECT id, name, specs FROM items')).rows;
+    const groups = (await client.query('SELECT id, name FROM discount_groups')).rows;
+
+    for (let i = 0; i < rows.length; i++) {
+      const r = rows[i];
+      const line = i + 2; // CSV 第 1 列是標題
+      const item = items.find((it) => it.id === Number(r.item_id));
+      if (!item) { skipped.push(`第 ${line} 列：找不到品項ID ${r.item_id}`); continue; }
+      const specs = JSON.parse(item.specs || '[]');
+      const spec = String(r.spec ?? '').trim();
+      if (!(specs.length ? specs : ['']).includes(spec)) {
+        skipped.push(`第 ${line} 列：「${item.name}」沒有規格「${spec || '（空白）'}」`); continue;
+      }
+      const priceText = String(r.list_price ?? '').trim();
+      const listPrice = toNumberOrNull(priceText);
+      if (priceText && listPrice === null) { skipped.push(`第 ${line} 列：牌價「${priceText}」不是數字`); continue; }
+
+      let groupId = null;
+      const groupName = String(r.group_name ?? '').trim();
+      if (groupName) {
+        let g = groups.find((x) => x.name === groupName);
+        if (!g) {
+          g = (await client.query(
+            `INSERT INTO discount_groups (name, sort_order)
+             VALUES ($1, (SELECT COALESCE(MAX(sort_order),0)+1 FROM discount_groups)) RETURNING id, name`, [groupName]
+          )).rows[0];
+          groups.push(g);
+          createdGroups.push(groupName);
+        }
+        groupId = g.id;
+      }
+
+      if (listPrice === null && groupId === null) {
+        await client.query('DELETE FROM item_prices WHERE item_id=$1 AND spec=$2', [item.id, spec]);
+      } else {
+        await client.query(
+          `INSERT INTO item_prices (item_id, spec, list_price, group_id) VALUES ($1,$2,$3,$4)
+           ON CONFLICT (item_id, spec) DO UPDATE SET list_price = EXCLUDED.list_price, group_id = EXCLUDED.group_id`,
+          [item.id, spec, listPrice, groupId]
+        );
+      }
+      updated++;
+    }
+    await client.query('COMMIT');
+    res.json({ ok: true, updated, skipped, created_groups: createdGroups });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error(err);
+    res.status(500).json({ error: '匯入牌價失敗' });
+  } finally {
+    client.release();
+  }
+});
+
+// ============================================================
+// 訂單查詢（後台專用，含牌價/折數/單價）
+// 注意：必須放在 /orders/export.csv 之後，否則 export.csv 會被當成 :id
+// ============================================================
+function formatOrderRow(o) {
+  o.created_at = o.created_at_fmt; delete o.created_at_fmt;
+  o.need_date = o.need_date_fmt; delete o.need_date_fmt;
+  return o;
+}
+
+router.get('/orders', async (req, res) => {
+  try {
+    const { name, title, from, to } = req.query;
+    let sql = `SELECT *, TO_CHAR(created_at AT TIME ZONE 'Asia/Taipei', 'YYYY-MM-DD HH24:MI:SS') AS created_at_fmt,
+                 TO_CHAR(need_date, 'YYYY-MM-DD') AS need_date_fmt
+               FROM orders WHERE 1=1`;
+    const params = [];
+    if (name) { params.push(`%${name}%`); sql += ` AND requester_name ILIKE $${params.length}`; }
+    if (title) { params.push(`%${title}%`); sql += ` AND title ILIKE $${params.length}`; }
+    if (from) { params.push(from); sql += ` AND created_at AT TIME ZONE 'Asia/Taipei' >= $${params.length}::date`; }
+    if (to) { params.push(to); sql += ` AND created_at AT TIME ZONE 'Asia/Taipei' < ($${params.length}::date + INTERVAL '1 day')`; }
+    sql += ' ORDER BY id DESC';
+
+    const orders = (await pool.query(sql, params)).rows.map(formatOrderRow);
+    const ids = orders.map((o) => o.id);
+    const allItems = ids.length
+      ? (await pool.query('SELECT * FROM order_items WHERE order_id = ANY($1::int[]) ORDER BY id', [ids])).rows
+      : [];
+    res.json(orders.map((o) => ({ ...o, items: allItems.filter((it) => it.order_id === o.id) })));
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: '查詢歷史紀錄失敗' });
+  }
+});
+
+router.get('/orders/:id', async (req, res) => {
+  try {
+    const order = (await pool.query(
+      `SELECT *, TO_CHAR(created_at AT TIME ZONE 'Asia/Taipei', 'YYYY-MM-DD HH24:MI:SS') AS created_at_fmt,
+                 TO_CHAR(need_date, 'YYYY-MM-DD') AS need_date_fmt
+       FROM orders WHERE id = $1`, [req.params.id]
+    )).rows[0];
+    if (!order) return res.status(404).json({ error: '找不到這筆叫料單' });
+    const items = (await pool.query('SELECT * FROM order_items WHERE order_id = $1 ORDER BY id', [order.id])).rows;
+    res.json({ ...formatOrderRow(order), items });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: '查詢叫料單失敗' });
+  }
+});
 
 module.exports = router;
