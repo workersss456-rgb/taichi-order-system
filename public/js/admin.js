@@ -90,12 +90,6 @@ function bindCatalogManagement() {
   document.getElementById('new-item-btn').addEventListener('click', () => openItemForm());
   document.getElementById('item-form-cancel').addEventListener('click', closeItemForm);
   document.getElementById('item-form').addEventListener('submit', submitItemForm);
-
-  document.getElementById('filter-cat').addEventListener('change', () => {
-    populateSubcatFilter();
-    renderItemsTable();
-  });
-  document.getElementById('filter-subcat').addEventListener('change', renderItemsTable);
 }
 
 async function loadCatalogManagement() {
@@ -111,7 +105,6 @@ async function loadCatalogManagement() {
     items = allItems;
 
     renderCatTree(catalog);
-    populateCatFilter();
     renderItemsTable();
     populateSubcatSelect();
   } catch (err) {
@@ -242,48 +235,13 @@ function populateSubcatSelect() {
   }).join('');
 }
 
-// ---------- 品項清單的分類/子分類篩選 ----------
-function populateCatFilter() {
-  const sel = document.getElementById('filter-cat');
-  const current = sel.value;
-  sel.innerHTML = '<option value="">全部分類</option>' +
-    categories.map((c) => `<option value="${c.id}">${escapeHtml(c.name)}</option>`).join('');
-  sel.value = categories.some((c) => String(c.id) === current) ? current : '';
-  populateSubcatFilter();
-}
-
-function populateSubcatFilter() {
-  const catId = document.getElementById('filter-cat').value;
-  const sel = document.getElementById('filter-subcat');
-  const current = sel.value;
-  const list = catId ? subcategories.filter((s) => String(s.category_id) === catId) : subcategories;
-  sel.innerHTML = '<option value="">全部子分類</option>' +
-    list.map((s) => `<option value="${s.id}">${escapeHtml(s.name)}</option>`).join('');
-  sel.value = list.some((s) => String(s.id) === current) ? current : '';
-}
-
-// 目前篩選出來的品項清單（給表格渲染跟「新增品項」預帶子分類共用）
-function getFilteredItems() {
-  const catId = document.getElementById('filter-cat').value;
-  const subId = document.getElementById('filter-subcat').value;
-  return items.filter((it) => {
-    if (subId) return String(it.subcategory_id) === subId;
-    if (catId) {
-      const sub = subcategories.find((s) => s.id === it.subcategory_id);
-      return sub && String(sub.category_id) === catId;
-    }
-    return true;
-  });
-}
-
 function renderItemsTable() {
   const tbody = document.getElementById('items-tbody');
-  const filtered = getFilteredItems();
-  if (!filtered.length) {
-    tbody.innerHTML = `<tr><td colspan="7" class="small-note" style="text-align:center; padding:20px;">這個篩選條件下還沒有品項</td></tr>`;
+  if (!items.length) {
+    tbody.innerHTML = `<tr><td colspan="7" class="small-note" style="text-align:center; padding:20px;">還沒有任何品項</td></tr>`;
     return;
   }
-  tbody.innerHTML = filtered.map((it) => {
+  tbody.innerHTML = items.map((it) => {
     const sub = subcategories.find((s) => s.id === it.subcategory_id);
     return `
       <tr data-sort-id="${it.id}">
@@ -313,12 +271,7 @@ function renderItemsTable() {
     } catch (err) { showToast(err.message, 'error'); }
   }));
 
-  const subFilterSelected = !!document.getElementById('filter-subcat').value;
-  if (subFilterSelected) {
-    enableDragSort(tbody, 'tr[data-sort-id]', 'y', (ids) => saveOrder('items', ids));
-  } else {
-    tbody.querySelectorAll('.drag-handle').forEach((h) => { h.style.opacity = '0.3'; h.title = '請先篩選單一子分類才能拖曳排序'; });
-  }
+  enableDragSort(tbody, 'tr[data-sort-id]', 'y', (ids) => saveOrder('items', ids));
 }
 
 function openItemForm(item) {
@@ -328,9 +281,7 @@ function openItemForm(item) {
   document.getElementById('item-form-title').textContent = item ? '編輯品項' : '新增品項';
   document.getElementById('item-id').value = item ? item.id : '';
   document.getElementById('item-name').value = item ? item.name : '';
-  document.getElementById('item-subcat').value = item
-    ? item.subcategory_id
-    : (document.getElementById('filter-subcat').value || subcategories[0]?.id || '');
+  document.getElementById('item-subcat').value = item ? item.subcategory_id : (subcategories[0]?.id || '');
   document.getElementById('item-image').value = item ? item.image_url : '';
   document.getElementById('item-desc').value = item ? item.description : '';
   document.getElementById('item-unit').value = item ? item.unit : '個';
@@ -359,17 +310,6 @@ async function submitItemForm(e) {
     sort_order: +document.getElementById('item-sort').value || 0,
     active: document.getElementById('item-active').checked,
   };
-
-  // 同一個子分類底下已經有同名品項的話，先提醒一下，讓使用者自己決定要不要繼續
-  const dup = items.find((it) =>
-    it.subcategory_id === payload.subcategory_id &&
-    it.name.trim().toLowerCase() === payload.name.toLowerCase() &&
-    String(it.id) !== id
-  );
-  if (dup && !confirm(`這個子分類底下已經有一個叫「${dup.name}」的品項了，確定要繼續新增/儲存嗎？`)) {
-    return;
-  }
-
   try {
     if (id) await Api.put(`/api/admin/items/${id}`, payload, true);
     else await Api.post('/api/admin/items', payload, true);
@@ -651,7 +591,7 @@ async function loadHistoryPanel() {
         <div class="ticket-row sub">送貨地址：${escapeHtml(o.site_address || '-')}　施工用途：${escapeHtml(o.purpose || '-')}</div>
         ${o.items.map((it) => `
           <div class="ticket-row">
-            <span class="name">${it.has_issue ? '<span style="color:var(--danger); font-weight:700;">⚠️ </span>' : ''}${escapeHtml(it.item_name)} ${[it.spec, it.color].filter(Boolean).map((s) => `· ${escapeHtml(s)}`).join(' ')}</span>
+            <span class="name">${escapeHtml(it.item_name)} ${[it.spec, it.color].filter(Boolean).map((s) => `· ${escapeHtml(s)}`).join(' ')}</span>
             <span class="sub">x${it.quantity} ${escapeHtml(it.unit || '')}</span>
           </div>
           ${it.note ? `<div class="ticket-row sub" style="padding-left:12px;">　備註：${escapeHtml(it.note)}</div>` : ''}
