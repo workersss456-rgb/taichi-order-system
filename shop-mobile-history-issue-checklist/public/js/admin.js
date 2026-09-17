@@ -624,7 +624,7 @@ async function loadHistoryPanel() {
   if (to) params.set('to', to);
 
   try {
-    let orders = await Api.get(`/api/orders?${params.toString()}`, true);
+    let orders = await Api.get(`/api/admin/orders?${params.toString()}`, true);
     if (status) orders = orders.filter((o) => (o.status || 'submitted') === status);
 
     if (!orders.length) {
