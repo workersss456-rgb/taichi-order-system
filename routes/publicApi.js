@@ -186,7 +186,13 @@ router.post('/orders', async (req, res) => {
   }
 });
 
-// ---------- 單筆叫料單查詢（列印單據用） ----------
+// 前台品項不帶價格欄位（牌價/折數/單價是內部成本資訊，商城端一律不回傳）
+function stripItemPricing(item) {
+  const { list_price, discount, unit_price, ...rest } = item;
+  return rest;
+}
+
+// ---------- 單筆叫料單查詢（前台列印單據/確認畫面用，不含價格） ----------
 router.get('/orders/:id', async (req, res) => {
   try {
     const order = (await pool.query(
@@ -200,7 +206,7 @@ router.get('/orders/:id', async (req, res) => {
     order.need_date = order.need_date_fmt;
     delete order.need_date_fmt;
     const items = (await pool.query('SELECT * FROM order_items WHERE order_id = $1 ORDER BY id', [order.id])).rows;
-    res.json({ ...order, items });
+    res.json({ ...order, items: items.map(stripItemPricing) });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: '查詢叫料單失敗' });
@@ -233,7 +239,7 @@ router.get('/orders', async (req, res) => {
     const result = [];
     for (const o of orders) {
       const items = (await pool.query('SELECT * FROM order_items WHERE order_id = $1', [o.id])).rows;
-      result.push({ ...o, items });
+      result.push({ ...o, items: items.map(stripItemPricing) });
     }
     res.json(result);
   } catch (err) {
