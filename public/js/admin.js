@@ -67,6 +67,7 @@ function bindAdminNav() {
     btn.addEventListener('click', () => {
       document.querySelectorAll('.admin-nav-item[data-panel]').forEach((b) => b.classList.toggle('active', b === btn));
       document.querySelectorAll('.admin-panel').forEach((p) => p.classList.toggle('active', p.id === `panel-${btn.dataset.panel}`));
+      window.scrollTo({ top: 0, behavior: 'smooth' });
     });
   });
 }

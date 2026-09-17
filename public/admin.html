@@ -53,10 +53,19 @@
       </div>
 
       <div class="card">
-        <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:14px;">
+        <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:14px; flex-wrap:wrap; gap:10px;">
           <h3 style="font-size:14px;">品項清單</h3>
           <button class="btn btn-primary btn-sm" id="new-item-btn">＋ 新增品項</button>
         </div>
+        <div style="display:flex; gap:10px; margin-bottom:8px; flex-wrap:wrap;">
+          <select id="filter-cat" style="padding:8px 10px; border:1px solid var(--border); border-radius:6px; background:var(--surface-sunken); min-width:160px;">
+            <option value="">全部分類</option>
+          </select>
+          <select id="filter-subcat" style="padding:8px 10px; border:1px solid var(--border); border-radius:6px; background:var(--surface-sunken); min-width:160px;">
+            <option value="">全部子分類</option>
+          </select>
+        </div>
+        <p class="small-note" style="margin-bottom:14px;">💡 篩選到單一子分類時，品項列可以直接拖曳調整順序。</p>
         <div style="overflow-x:auto;">
           <table class="table" id="items-table">
             <thead><tr><th>圖片</th><th>名稱</th><th>子分類</th><th>規格</th><th>顏色</th><th>狀態</th><th>操作</th></tr></thead>
