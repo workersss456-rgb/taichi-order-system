@@ -230,8 +230,8 @@ a { color: var(--primary); }
 .item-img {
   width: 100%;
   aspect-ratio: 1;
-  object-fit: cover;
-  background: var(--surface-sunken);
+  object-fit: contain; /* 完整顯示照片，不裁切；非正方形照片會留白 */
+  background: #fff;
   border-bottom: 1px solid var(--border);
 }
 .item-body { padding: 12px 14px 14px; display: flex; flex-direction: column; gap: 8px; flex: 1; }
@@ -568,7 +568,7 @@ a { color: var(--primary); }
 
   /* 手機固定一列 2 欄，卡片內容跟著縮小才塞得下 */
   .item-grid { grid-template-columns: 1fr 1fr; gap: 8px; }
-  .item-img { height: 90px; }
+  .item-img { height: auto; aspect-ratio: 1; padding: 4px; } /* 手機版維持正方形，照片完整顯示 */
   .item-body { padding: 8px 9px 10px; gap: 5px; }
   .item-name { font-size: 12.5px; line-height: 1.3; }
   .item-desc { display: none; } /* 手機版空間有限，說明文字先隱藏，卡片仍可點進去看細節 */
