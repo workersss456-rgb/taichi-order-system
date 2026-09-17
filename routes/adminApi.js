@@ -339,60 +339,6 @@ router.put('/orders/:id/pricing', async (req, res) => {
   }
 });
 
-// ---------- 訂單清單查詢（後台專用，含牌價/折數/單價；歷史紀錄面板用這支，前台歷史紀錄請看 /api/orders） ----------
-router.get('/orders', async (req, res) => {
-  try {
-    const { name, title, from, to } = req.query;
-    let sql = `SELECT *, TO_CHAR(created_at AT TIME ZONE 'Asia/Taipei', 'YYYY-MM-DD HH24:MI:SS') AS created_at_fmt,
-                 TO_CHAR(need_date, 'YYYY-MM-DD') AS need_date_fmt
-               FROM orders WHERE 1=1`;
-    const params = [];
-
-    if (name) { params.push(`%${name}%`); sql += ` AND requester_name ILIKE $${params.length}`; }
-    if (title) { params.push(`%${title}%`); sql += ` AND title ILIKE $${params.length}`; }
-    if (from) { params.push(from); sql += ` AND created_at AT TIME ZONE 'Asia/Taipei' >= $${params.length}::date`; }
-    if (to) { params.push(to); sql += ` AND created_at AT TIME ZONE 'Asia/Taipei' < ($${params.length}::date + INTERVAL '1 day')`; }
-    sql += ' ORDER BY id DESC';
-
-    const orders = (await pool.query(sql, params)).rows.map((o) => {
-      o.created_at = o.created_at_fmt; delete o.created_at_fmt;
-      o.need_date = o.need_date_fmt; delete o.need_date_fmt;
-      return o;
-    });
-
-    const result = [];
-    for (const o of orders) {
-      const items = (await pool.query('SELECT * FROM order_items WHERE order_id = $1', [o.id])).rows;
-      result.push({ ...o, items });
-    }
-    res.json(result);
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: '查詢歷史紀錄失敗' });
-  }
-});
-
-// ---------- 單筆叫料單查詢（後台專用，含牌價/折數/單價，供內部核簽單列印使用） ----------
-router.get('/orders/:id', async (req, res) => {
-  try {
-    const order = (await pool.query(
-      `SELECT *, TO_CHAR(created_at AT TIME ZONE 'Asia/Taipei', 'YYYY-MM-DD HH24:MI:SS') AS created_at_fmt,
-                 TO_CHAR(need_date, 'YYYY-MM-DD') AS need_date_fmt
-       FROM orders WHERE id = $1`, [req.params.id]
-    )).rows[0];
-    if (!order) return res.status(404).json({ error: '找不到這筆叫料單' });
-    order.created_at = order.created_at_fmt;
-    delete order.created_at_fmt;
-    order.need_date = order.need_date_fmt;
-    delete order.need_date_fmt;
-    const items = (await pool.query('SELECT * FROM order_items WHERE order_id = $1 ORDER BY id', [order.id])).rows;
-    res.json({ ...order, items });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: '查詢叫料單失敗' });
-  }
-});
-
 // ---------- 特殊設備採購審核 ----------
 router.put('/special-requests/:id', async (req, res) => {
   try {
