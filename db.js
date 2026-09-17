@@ -78,7 +78,7 @@ async function createTables() {
       unit TEXT,
       note TEXT,
       list_price NUMERIC(12,2),
-      discount NUMERIC(6,4),
+      discount NUMERIC(10,2),
       unit_price NUMERIC(12,2),
       has_issue BOOLEAN DEFAULT false
     );
@@ -141,7 +141,7 @@ async function createTables() {
 
     -- 廠商報價（採購在後台填寫，單價 = 牌價 × 折數）
     ALTER TABLE order_items ADD COLUMN IF NOT EXISTS list_price NUMERIC(12,2);
-    ALTER TABLE order_items ADD COLUMN IF NOT EXISTS discount NUMERIC(6,4);
+    ALTER TABLE order_items ADD COLUMN IF NOT EXISTS discount NUMERIC(10,2);
     ALTER TABLE order_items ADD COLUMN IF NOT EXISTS unit_price NUMERIC(12,2);
     ALTER TABLE order_items ADD COLUMN IF NOT EXISTS has_issue BOOLEAN DEFAULT false;
   `);
@@ -176,13 +176,46 @@ async function createTables() {
       group_id INTEGER NOT NULL REFERENCES discount_groups(id) ON DELETE CASCADE,
       vendor_id INTEGER NOT NULL REFERENCES vendors(id) ON DELETE CASCADE,
       month TEXT NOT NULL,
-      discount NUMERIC(6,4) NOT NULL,
+      discount NUMERIC(10,2) NOT NULL,
       updated_at TIMESTAMPTZ DEFAULT NOW(),
       UNIQUE (group_id, vendor_id, month)
     );
 
     ALTER TABLE orders ADD COLUMN IF NOT EXISTS vendor_id INTEGER REFERENCES vendors(id) ON DELETE SET NULL;
   `);
+
+  await runOnceMigrations();
+}
+
+// ---------- 只執行一次的資料轉換 ----------
+async function runOnceMigrations() {
+  await pool.query('CREATE TABLE IF NOT EXISTS schema_migrations (name TEXT PRIMARY KEY, ran_at TIMESTAMPTZ DEFAULT NOW())');
+
+  // 折數改用百分比：75 折存 75（原本存 0.75），而且允許超過 100
+  // 1) 欄位放寬：原本 NUMERIC(6,4) 最大只能到 99.9999
+  // 2) 舊資料裡用小數填的（<= 2，例如 0.75）乘 100 轉成百分比
+  // 3) 依新公式重算單價：單價 = 牌價 × 折數 ÷ 100
+  const name = '2026-09-percent-discount';
+  const done = (await pool.query('SELECT 1 FROM schema_migrations WHERE name = $1', [name])).rows.length;
+  if (done) return;
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query('ALTER TABLE order_items ALTER COLUMN discount TYPE NUMERIC(10,2) USING discount');
+    await client.query('ALTER TABLE monthly_discounts ALTER COLUMN discount TYPE NUMERIC(10,2) USING discount');
+    await client.query('UPDATE order_items SET discount = discount * 100 WHERE discount IS NOT NULL AND discount <= 2');
+    await client.query('UPDATE monthly_discounts SET discount = discount * 100 WHERE discount <= 2');
+    await client.query(`UPDATE order_items SET unit_price = ROUND(list_price * discount / 100, 2)
+                        WHERE list_price IS NOT NULL AND discount IS NOT NULL`);
+    await client.query('INSERT INTO schema_migrations (name) VALUES ($1)', [name]);
+    await client.query('COMMIT');
+    console.log('✅ 折數已轉換為百分比格式（75 折 = 75）');
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
 }
 
 // ---------- 初次啟動時放入示範資料，方便直接看到畫面長怎樣 ----------

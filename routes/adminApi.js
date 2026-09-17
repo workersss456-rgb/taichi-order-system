@@ -363,8 +363,8 @@ router.put('/orders/:id/pricing', async (req, res) => {
         ? null : Number(it.list_price);
       const disc = it.discount === '' || it.discount === null || it.discount === undefined
         ? null : Number(it.discount);
-      // 單價由後端算，避免前端算的跟存的不一致
-      const unit = (list !== null && disc !== null) ? Math.round(list * disc * 100) / 100 : null;
+      // 單價由後端算，避免前端算的跟存的不一致；折數是百分比（75 折 = 75，可以超過 100）
+      const unit = (list !== null && disc !== null) ? Math.round(list * disc) / 100 : null;
       await client.query(
         'UPDATE order_items SET list_price = $1, discount = $2, unit_price = $3 WHERE id = $4 AND order_id = $5',
         [list, disc, unit, it.id, req.params.id]
@@ -543,8 +543,8 @@ router.put('/discounts', async (req, res) => {
 
   for (const e of entries) {
     const d = toNumberOrNull(e.discount);
-    if (d !== null && (d <= 0 || d > 1.5)) {
-      return res.status(400).json({ error: `折數 ${e.discount} 看起來不對，請填小數（75 折填 0.75）` });
+    if (e.discount !== '' && e.discount !== null && e.discount !== undefined && (d === null || d < 0)) {
+      return res.status(400).json({ error: `折數「${e.discount}」不是有效的數字` });
     }
   }
 

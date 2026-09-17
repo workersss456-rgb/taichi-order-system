@@ -748,9 +748,9 @@ async function saveDiscountGrid() {
   if (!month || !cells.length) return;
   for (const c of cells) {
     const v = c.value.trim();
-    if (v && !(Number(v) > 0 && Number(v) <= 1.5)) {
+    if (v && !(Number(v) >= 0)) {
       c.focus();
-      return showToast(`折數「${v}」不正確，請填小數（75 折填 0.75）`, 'error');
+      return showToast(`折數「${v}」不是有效的數字`, 'error');
     }
   }
   const entries = cells.map((c) => ({ group_id: +c.dataset.group, vendor_id: +c.dataset.vendor, discount: c.value.trim() }));
@@ -868,7 +868,7 @@ function renderPricingBlock(o) {
         <td>${escapeHtml(it.item_name)} ${[it.spec, it.color].filter(Boolean).map(escapeHtml).join(' / ')}<div class="price-hint" data-item="${it.id}"></div></td>
         <td style="text-align:center;">${it.quantity} ${escapeHtml(it.unit || '')}</td>
         <td><input type="number" step="0.01" min="0" class="price-list" data-item="${it.id}" value="${it.list_price ?? ''}" placeholder="牌價" style="width:90px; padding:4px 6px; border:1px solid var(--border); border-radius:5px; background:var(--surface-sunken);"></td>
-        <td><input type="number" step="0.01" min="0" max="1" class="price-disc" data-item="${it.id}" value="${it.discount ?? ''}" placeholder="0.75" style="width:70px; padding:4px 6px; border:1px solid var(--border); border-radius:5px; background:var(--surface-sunken);"></td>
+        <td><input type="number" step="0.01" min="0" class="price-disc" data-item="${it.id}" value="${it.discount === null || it.discount === undefined ? '' : Number(it.discount)}" placeholder="75" style="width:70px; padding:4px 6px; border:1px solid var(--border); border-radius:5px; background:var(--surface-sunken);"></td>
         <td class="price-unit" data-item="${it.id}" style="text-align:right;">${money(it.unit_price)}</td>
         <td class="price-sub" data-item="${it.id}" style="text-align:right;">${money(sub)}</td>
       </tr>
@@ -887,13 +887,13 @@ function renderPricingBlock(o) {
       </summary>
       <div style="overflow-x:auto; margin-top:8px;">
         <table class="table pricing-table" data-id="${o.id}" style="font-size:12.5px;">
-          <thead><tr><th>品項</th><th style="text-align:center;">數量</th><th>牌價</th><th>折數<br><span style="font-weight:400; font-size:11px;">(小數，如 0.75)</span></th><th style="text-align:right;">單價</th><th style="text-align:right;">小計</th></tr></thead>
+          <thead><tr><th>品項</th><th style="text-align:center;">數量</th><th>牌價</th><th>折數 %<br><span style="font-weight:400; font-size:11px;">(75 折填 75)</span></th><th style="text-align:right;">單價</th><th style="text-align:right;">小計</th></tr></thead>
           <tbody>${rows}</tbody>
         </table>
       </div>
       <button class="btn btn-secondary btn-sm autofill-pricing-btn" data-id="${o.id}" style="margin-top:8px;">📥 依牌價＋廠商折數帶入</button>
       <button class="btn btn-primary btn-sm save-pricing-btn" data-id="${o.id}" style="margin-top:8px;">儲存報價</button>
-      <p class="small-note">先在上方選好廠商，按「帶入」會依品項牌價與該廠商在下單月份的折數自動填入；確認或修改後按「儲存報價」才會存檔。單價 = 牌價 × 折數。</p>
+      <p class="small-note">先在上方選好廠商，按「帶入」會依品項牌價與該廠商在下單月份的折數自動填入；確認或修改後按「儲存報價」才會存檔。單價 = 牌價 × 折數 ÷ 100（75 折填 75，可超過 100）。</p>
     </details>
   `;
 }
@@ -1034,7 +1034,7 @@ function bindHistoryActions(list) {
         const qty = parseFloat(tr.children[1].textContent) || 0;
         const l = parseFloat(listInput.value);
         const d = parseFloat(discInput.value);
-        const unit = (!isNaN(l) && !isNaN(d)) ? Math.round(l * d * 100) / 100 : null;
+        const unit = (!isNaN(l) && !isNaN(d)) ? Math.round(l * d) / 100 : null;
         tr.querySelector('.price-unit').textContent = unit === null ? '' : money(unit);
         const sub = unit === null ? null : unit * qty;
         tr.querySelector('.price-sub').textContent = sub === null ? '' : money(sub);
