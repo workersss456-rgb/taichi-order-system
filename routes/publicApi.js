@@ -266,6 +266,7 @@ router.put('/orders/:id/receive', async (req, res) => {
     const current = (await pool.query('SELECT status FROM orders WHERE id = $1', [req.params.id])).rows[0];
     if (!current) return res.status(404).json({ error: '找不到這筆叫料單' });
     if (current.status === 'closed') return res.status(400).json({ error: '這筆訂單已經結案了' });
+    if (current.status === 'received') return res.status(400).json({ error: '這筆訂單已經回報收貨，正在等後台確認' });
 
     let row;
     if (has_issue) {
@@ -287,14 +288,15 @@ router.put('/orders/:id/receive', async (req, res) => {
       notifyOrderStatusEvent({ order: row, eventType: 'issue_reported', extra: row.issue_note })
         .catch((err) => console.error('異常回報通知失敗：', err.message));
     } else {
+      // 現場回報收貨無異常後，還要由後台確認才算結案
       row = (await pool.query(
-        `UPDATE orders SET status = 'closed', received_at = NOW(), closed_at = NOW() WHERE id = $1
+        `UPDATE orders SET status = 'received', received_at = NOW() WHERE id = $1
          RETURNING *, TO_CHAR(need_date, 'YYYY-MM-DD') AS need_date_fmt`,
         [req.params.id]
       )).rows[0];
       row.need_date = row.need_date_fmt; delete row.need_date_fmt;
-      notifyOrderStatusEvent({ order: row, eventType: 'closed', extra: '現場收貨無異常，直接結案' })
-        .catch((err) => console.error('結案通知失敗：', err.message));
+      notifyOrderStatusEvent({ order: row, eventType: 'received', extra: '現場收貨無異常，等待後台確認結案' })
+        .catch((err) => console.error('收貨通知失敗：', err.message));
     }
 
     res.json(publicOrder(row));

@@ -446,20 +446,29 @@ function bindHistorySearch() {
 }
 
 const ORDER_STATUS_LABEL = {
-  submitted: '送出訂單',
-  purchasing: '採購處理中',
-  vendor: '廠商處理中',
-  issue: '現場回報異常',
-  closed: '已結案',
+  submitted: '收單',
+  sent: '送單',
+  issue: '已回報異常',
+  received: '已回報收貨，待確認',
+  closed: '結案',
+  purchasing: '送單', // 舊資料
+  vendor: '送單',     // 舊資料
 };
 const ORDER_STATUS_CLASS = {
   submitted: 'badge-pending',
+  sent: 'badge-pending',
+  issue: 'badge-rejected',
+  received: 'badge-pending',
+  closed: 'badge-approved',
   purchasing: 'badge-pending',
   vendor: 'badge-pending',
-  issue: 'badge-rejected',
-  closed: 'badge-approved',
 };
-const HISTORY_TABS = ['submitted', 'purchasing', 'vendor', 'issue', 'closed'];
+// 三個頁籤：收單 / 送單 / 結案（異常與待確認都歸在送單）
+const HISTORY_TABS = [
+  { key: 'submitted', label: '收單', statuses: ['submitted'] },
+  { key: 'sent', label: '送單', statuses: ['sent', 'purchasing', 'vendor', 'issue', 'received'] },
+  { key: 'closed', label: '結案', statuses: ['closed'] },
+];
 
 let historyOrders = [];      // 目前查詢條件下的全部訂單（搜尋姓名/日期等），頁籤只是在這份資料上再篩選
 let historyActiveTab = 'submitted';
@@ -490,9 +499,9 @@ async function loadHistory() {
 function renderHistoryTabs() {
   const wrap = document.getElementById('hist-status-tabs');
   wrap.className = 'status-tabs';
-  wrap.innerHTML = HISTORY_TABS.map((st) => {
-    const count = historyOrders.filter((o) => (o.status || 'submitted') === st).length;
-    return `<button type="button" class="status-tab${st === historyActiveTab ? ' active' : ''}" data-tab="${st}">${ORDER_STATUS_LABEL[st]}<span class="count">${count}</span></button>`;
+  wrap.innerHTML = HISTORY_TABS.map((t) => {
+    const count = historyOrders.filter((o) => t.statuses.includes(o.status || 'submitted')).length;
+    return `<button type="button" class="status-tab${t.key === historyActiveTab ? ' active' : ''}" data-tab="${t.key}">${t.label}<span class="count">${count}</span></button>`;
   }).join('');
 
   wrap.querySelectorAll('.status-tab').forEach((btn) => btn.addEventListener('click', () => {
@@ -504,7 +513,8 @@ function renderHistoryTabs() {
 
 function renderHistoryList() {
   const list = document.getElementById('history-list');
-  const orders = historyOrders.filter((o) => (o.status || 'submitted') === historyActiveTab);
+  const activeTab = HISTORY_TABS.find((t) => t.key === historyActiveTab);
+  const orders = historyOrders.filter((o) => activeTab.statuses.includes(o.status || 'submitted'));
 
   if (!orders.length) {
     list.innerHTML = `<div class="empty-state"><div class="icon">📭</div>這個狀態底下沒有叫料紀錄</div>`;
@@ -513,7 +523,8 @@ function renderHistoryList() {
 
   list.innerHTML = orders.map((o) => {
     const st = o.status || 'submitted';
-    const canReceive = st === 'vendor' || st === 'purchasing' || st === 'submitted';
+    // 已回報收貨（待後台確認）與已結案就不再開放回報
+    const canReceive = st !== 'closed' && st !== 'received';
     const itemCount = o.items.reduce((sum, it) => sum + it.quantity, 0);
     return `
     <div class="ticket" data-order-id="${o.id}">
@@ -542,6 +553,7 @@ function renderHistoryList() {
         `).join('')}
         ${o.note ? `<div class="ticket-row sub" style="margin-top:6px;">備註：${escapeHtml(o.note)}</div>` : ''}
         ${o.issue_note ? `<div class="ticket-row sub" style="margin-top:6px; color:var(--danger);">⚠️ 已回報異常：${escapeHtml(o.issue_note)}</div>` : ''}
+        ${st === 'received' ? `<div class="ticket-row sub" style="margin-top:6px;">📦 已回報收貨，等待後台確認結案</div>` : ''}
         ${o.purchase_reply ? `<div class="ticket-row sub" style="margin-top:4px;">採購處理內容：${escapeHtml(o.purchase_reply)}</div>` : ''}
 
         <div class="ticket-row" style="margin-top:10px; gap:8px; flex-wrap:wrap;">

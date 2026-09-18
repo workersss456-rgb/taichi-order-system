@@ -621,3 +621,13 @@ a { color: var(--primary); }
 .disc-row input { width: 72px; text-align: center; }
 .disc-row input.inherited { color: var(--text-faint); font-style: italic; }
 .disc-unit { font-size: 12px; color: var(--text-faint); }
+
+/* ---------- 後台歷史紀錄（三階段頁籤 / 合併表格） ---------- */
+.status-tab .count.alert { background: var(--brand-gold, #F4B223); color: #4a3200; }
+.status-tab .count.danger { background: var(--danger); color: #fff; }
+.pricing-table tr.row-issue > td { background: rgba(220, 38, 38, 0.06); }
+.ticket.ticket-waiting { border-left: 3px solid var(--brand-gold, #F4B223); }
+.ticket.ticket-issue { border-left: 3px solid var(--danger); }
+.pricing-table tfoot td { border-top: 2px solid var(--border); }
+#report-chart svg { display: block; }
+#report-chart .bar-hit:hover rect:nth-of-type(2) { opacity: .82; }

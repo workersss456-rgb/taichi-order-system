@@ -30,7 +30,10 @@
   <aside class="admin-sidebar">
     <div class="brand"><span class="brand-mark">叫</span>管理後台</div>
     <button class="admin-nav-item active" data-panel="items">品項管理</button>
-    <button class="admin-nav-item" data-panel="pricing">廠商 / 每月折數</button>
+    <button class="admin-nav-item" data-panel="vendors">廠商清單</button>
+    <button class="admin-nav-item" data-panel="groups">折扣群組</button>
+    <button class="admin-nav-item" data-panel="discounts">每月折數</button>
+    <button class="admin-nav-item" data-panel="report">案場統計</button>
     <button class="admin-nav-item" data-panel="sites">案場管理</button>
     <button class="admin-nav-item" data-panel="special">特殊採購審核</button>
     <button class="admin-nav-item" data-panel="history">叫料歷史紀錄</button>
@@ -106,38 +109,61 @@
       </div>
     </section>
 
-    <!-- ---- 廠商 / 每月折數 ---- -->
-    <section class="admin-panel" id="panel-pricing">
-      <div class="section-title"><div><span class="eyebrow">Pricing</span><h2>廠商 / 折扣群組 / 每月折數</h2></div></div>
-      <p class="small-note" style="margin-bottom:14px;">牌價固定設定在品項規格上。每個折扣群組先勾選配合廠商（例如 PVC 管和鋼管各自找不同家），下方每月只需要填這些廠商的折數；當月沒填會沿用最近一個月的數字。</p>
-
-      <div class="pricing-lists">
-        <div class="card">
-          <h3 style="font-size:14px; margin-bottom:12px;">廠商清單</h3>
-          <div style="display:flex; gap:8px; margin-bottom:12px;">
-            <input type="text" id="new-vendor-name" class="mini-input" placeholder="新廠商名稱" style="flex:1;">
-            <button class="btn btn-secondary btn-sm" id="add-vendor-btn">新增</button>
-          </div>
-          <div id="vendor-list" class="tag-input-list"></div>
+    <!-- ---- 廠商清單 ---- -->
+    <section class="admin-panel" id="panel-vendors">
+      <div class="section-title"><div><span class="eyebrow">Vendors</span><h2>廠商清單</h2></div></div>
+      <p class="small-note" style="margin-bottom:14px;">這裡只維護廠商名稱。哪些廠商供應哪些材料，請到「折扣群組」設定。</p>
+      <div class="card">
+        <div style="display:flex; gap:8px; margin-bottom:14px; flex-wrap:wrap;">
+          <input type="text" id="new-vendor-name" class="mini-input" placeholder="新廠商名稱" style="flex:1; min-width:180px;">
+          <button class="btn btn-secondary" id="add-vendor-btn">新增廠商</button>
         </div>
-        <div class="card">
-          <h3 style="font-size:14px; margin-bottom:12px;">折扣群組</h3>
-          <div style="display:flex; gap:8px; margin-bottom:12px;">
-            <input type="text" id="new-group-name" class="mini-input" placeholder="例如：PVC 管、鋼管、電線-細線" style="flex:1;">
-            <button class="btn btn-secondary btn-sm" id="add-group-btn">新增</button>
-          </div>
-          <div id="group-list" class="tag-input-list"></div>
-        </div>
+        <div id="vendor-list" class="tag-input-list"></div>
       </div>
+    </section>
 
-      <div class="card" style="margin-top:20px;">
+    <!-- ---- 折扣群組 ---- -->
+    <section class="admin-panel" id="panel-groups">
+      <div class="section-title"><div><span class="eyebrow">Groups</span><h2>折扣群組</h2></div></div>
+      <p class="small-note" style="margin-bottom:14px;">把折數相同的材料歸成一組（例如 PVC 管、鋼管、電線-細線），再勾選這一組配合哪幾家廠商，並指定一家主要廠商作為估價時的預設。</p>
+      <div class="card">
+        <div style="display:flex; gap:8px; margin-bottom:14px; flex-wrap:wrap;">
+          <input type="text" id="new-group-name" class="mini-input" placeholder="例如：PVC 管、鋼管、電線-細線" style="flex:1; min-width:180px;">
+          <button class="btn btn-secondary" id="add-group-btn">新增群組</button>
+        </div>
+        <div id="group-list"></div>
+      </div>
+    </section>
+
+    <!-- ---- 每月折數 ---- -->
+    <section class="admin-panel" id="panel-discounts">
+      <div class="section-title"><div><span class="eyebrow">Discounts</span><h2>每月折數</h2></div></div>
+      <p class="small-note" style="margin-bottom:14px;">每個月更新一次。只會列出各群組有勾選的配合廠商；當月沒填會沿用最近一個月的數字。</p>
+      <div class="card">
         <div style="display:flex; align-items:flex-end; gap:12px; flex-wrap:wrap; margin-bottom:12px;">
           <div class="field" style="margin:0;"><label>月份</label><input type="month" id="disc-month" class="mini-input"></div>
           <button class="btn btn-primary btn-sm" id="disc-save-btn">儲存本月折數</button>
           <span class="small-note" id="disc-status" style="margin:0;"></span>
         </div>
-        <div style="overflow-x:auto;" id="disc-grid"></div>
-        <p class="small-note">折數以百分比填寫：75 折填 75，可以超過 100（例如 105）。灰色斜體是沿用前面月份的數字，按「儲存本月折數」會把畫面上所有數字存成這個月的設定；清空格子再儲存，代表本月不設定。只會列出各群組有勾選的配合廠商。</p>
+        <div id="disc-grid"></div>
+        <p class="small-note">折數以百分比填寫：75 折填 75，可以超過 100（例如 105）。灰色斜體是沿用前面月份的數字，按「儲存本月折數」會把畫面上所有數字存成這個月的設定；清空格子再儲存，代表本月不設定。</p>
+      </div>
+    </section>
+
+    <!-- ---- 案場統計 ---- -->
+    <section class="admin-panel" id="panel-report">
+      <div class="section-title"><div><span class="eyebrow">Report</span><h2>各案場當月材料與預估金額</h2></div></div>
+      <div class="card">
+        <div style="display:flex; align-items:flex-end; gap:12px; flex-wrap:wrap; margin-bottom:14px;">
+          <div class="field" style="margin:0;"><label>月份</label><input type="month" id="report-month" class="mini-input"></div>
+          <span class="small-note" id="report-status" style="margin:0;"></span>
+        </div>
+        <div id="report-chart"></div>
+        <p class="small-note">金額為已報價品項的小計加總（單價 × 數量），尚未報價的品項以 0 計算。點長條可以看該案場的材料明細。</p>
+      </div>
+      <div class="card" id="report-detail-card" style="margin-top:20px; display:none;">
+        <h3 style="font-size:14px; margin-bottom:12px;" id="report-detail-title">材料明細</h3>
+        <div style="overflow-x:auto;"><table class="table" id="report-detail-table"></table></div>
       </div>
     </section>
 
@@ -195,22 +221,12 @@
       <div class="filter-bar">
         <div class="field"><label>姓名</label><input type="text" id="ah-name"></div>
         <div class="field"><label>職稱</label><input type="text" id="ah-title"></div>
-        <div class="field">
-          <label>訂單狀態</label>
-          <select id="ah-status">
-            <option value="">全部</option>
-            <option value="submitted">送出訂單</option>
-            <option value="purchasing">採購處理中</option>
-            <option value="vendor">廠商處理中</option>
-            <option value="issue">現場回報異常</option>
-            <option value="closed">已結案</option>
-          </select>
-        </div>
         <div class="field"><label>起始日期</label><input type="date" id="ah-from"></div>
         <div class="field"><label>結束日期</label><input type="date" id="ah-to"></div>
         <button class="btn btn-primary" id="ah-search">搜尋</button>
         <button class="btn btn-secondary" id="ah-export">匯出 CSV</button>
       </div>
+      <div id="ah-status-tabs"></div>
       <div id="admin-history-list"></div>
     </section>
 

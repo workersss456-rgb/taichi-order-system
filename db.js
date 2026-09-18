@@ -205,27 +205,41 @@ async function runOnceMigrations() {
   // 1) 欄位放寬：原本 NUMERIC(6,4) 最大只能到 99.9999
   // 2) 舊資料裡用小數填的（<= 2，例如 0.75）乘 100 轉成百分比
   // 3) 依新公式重算單價：單價 = 牌價 × 折數 ÷ 100
-  const name = '2026-09-percent-discount';
+  await migrateOnce('2026-09-percent-discount', percentDiscountMigration);
+  await migrateOnce('2026-09-three-stage-status', threeStageStatusMigration);
+}
+
+// 舊的五段狀態（採購處理中 / 廠商處理中）合併成「送單」
+async function threeStageStatusMigration(client) {
+  await client.query(`UPDATE orders SET status = 'sent' WHERE status IN ('purchasing', 'vendor')`);
+  console.log('✅ 訂單狀態已合併為 收單 / 送單 / 結案');
+}
+
+async function migrateOnce(name, fn) {
   const done = (await pool.query('SELECT 1 FROM schema_migrations WHERE name = $1', [name])).rows.length;
   if (done) return;
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
-    await client.query('ALTER TABLE order_items ALTER COLUMN discount TYPE NUMERIC(10,2) USING discount');
-    await client.query('ALTER TABLE monthly_discounts ALTER COLUMN discount TYPE NUMERIC(10,2) USING discount');
-    await client.query('UPDATE order_items SET discount = discount * 100 WHERE discount IS NOT NULL AND discount <= 2');
-    await client.query('UPDATE monthly_discounts SET discount = discount * 100 WHERE discount <= 2');
-    await client.query(`UPDATE order_items SET unit_price = ROUND(list_price * discount / 100, 2)
-                        WHERE list_price IS NOT NULL AND discount IS NOT NULL`);
+    await fn(client);
     await client.query('INSERT INTO schema_migrations (name) VALUES ($1)', [name]);
     await client.query('COMMIT');
-    console.log('✅ 折數已轉換為百分比格式（75 折 = 75）');
   } catch (err) {
     await client.query('ROLLBACK');
     throw err;
   } finally {
     client.release();
   }
+}
+
+async function percentDiscountMigration(client) {
+  await client.query('ALTER TABLE order_items ALTER COLUMN discount TYPE NUMERIC(10,2) USING discount');
+  await client.query('ALTER TABLE monthly_discounts ALTER COLUMN discount TYPE NUMERIC(10,2) USING discount');
+  await client.query('UPDATE order_items SET discount = discount * 100 WHERE discount IS NOT NULL AND discount <= 2');
+  await client.query('UPDATE monthly_discounts SET discount = discount * 100 WHERE discount <= 2');
+  await client.query(`UPDATE order_items SET unit_price = ROUND(list_price * discount / 100, 2)
+                      WHERE list_price IS NOT NULL AND discount IS NOT NULL`);
+  console.log('✅ 折數已轉換為百分比格式（75 折 = 75）');
 }
 
 // ---------- 初次啟動時放入示範資料，方便直接看到畫面長怎樣 ----------

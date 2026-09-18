@@ -11,6 +11,7 @@ document.addEventListener('DOMContentLoaded', () => {
   bindCatalogManagement();
   bindSiteManagement();
   bindPricingPanel();
+  bindReportPanel();
   bindSpecialReview();
   bindHistoryPanel();
 
@@ -60,6 +61,7 @@ function enterAdmin() {
   document.getElementById('admin-shell').style.display = 'grid';
   loadCatalogManagement();
   loadPricingPanel();
+  loadReportPanel();
   loadSiteManagement();
   loadSpecialReview();
   loadHistoryPanel();
@@ -849,6 +851,109 @@ async function saveDiscountGrid() {
 }
 
 // ============================================================
+// 案場統計（當月各案場材料與預估金額）
+// ============================================================
+function bindReportPanel() {
+  const m = document.getElementById('report-month');
+  m.value = currentTaipeiMonth();
+  m.addEventListener('change', loadReportPanel);
+}
+
+let reportSites = [];
+
+async function loadReportPanel() {
+  const chart = document.getElementById('report-chart');
+  const status = document.getElementById('report-status');
+  const month = document.getElementById('report-month').value;
+  document.getElementById('report-detail-card').style.display = 'none';
+  if (!month) return;
+  chart.innerHTML = '<p class="small-note">載入中…</p>';
+  try {
+    const data = await Api.get(`/api/admin/site-summary?month=${month}`, true);
+    reportSites = data.sites;
+    if (!reportSites.length) {
+      chart.innerHTML = '<div class="empty-state"><div class="icon">📭</div>這個月還沒有叫料紀錄</div>';
+      status.textContent = '';
+      return;
+    }
+    const total = reportSites.reduce((sum, s) => sum + s.total, 0);
+    const unpriced = reportSites.reduce((sum, s) => sum + s.unpriced_count, 0);
+    status.textContent = `${reportSites.length} 個案場有叫料，合計 NT$ ${money(total)}`
+      + (unpriced ? `（另有 ${unpriced} 項尚未報價，未計入金額）` : '');
+    chart.innerHTML = renderBarChart(reportSites);
+    chart.querySelectorAll('.bar-hit').forEach((el) => el.addEventListener('click', () => showSiteDetail(+el.dataset.index)));
+  } catch (err) {
+    chart.innerHTML = `<p class="small-note">${escapeHtml(err.message)}</p>`;
+  }
+}
+
+// 用 SVG 自己畫長條圖：Y 軸每 1000 一格，只畫當月有叫料的案場
+function renderBarChart(sites) {
+  const gridStep = 1000;
+  const maxTotal = Math.max(...sites.map((s) => s.total), gridStep);
+  const topValue = Math.ceil(maxTotal / gridStep) * gridStep;
+  const gridCount = topValue / gridStep;
+
+  const barW = 46, gap = 26, padLeft = 78, padRight = 20, padTop = 24, labelH = 64;
+  const plotH = Math.max(240, Math.min(gridCount, 40) * 14);
+  const width = padLeft + padRight + sites.length * (barW + gap);
+  const height = padTop + plotH + labelH;
+  const y = (v) => padTop + plotH - (v / topValue) * plotH;
+
+  // 格線太密時只在整數倍標數字，避免文字疊在一起
+  const labelEvery = Math.ceil(gridCount / 10);
+  let grid = '';
+  for (let i = 0; i <= gridCount; i++) {
+    const gy = y(i * gridStep);
+    grid += `<line x1="${padLeft - 6}" y1="${gy}" x2="${width - padRight}" y2="${gy}" stroke="var(--border)" stroke-width="1"${i % labelEvery ? ' stroke-dasharray="2 4"' : ''}></line>`;
+    if (i % labelEvery === 0) {
+      grid += `<text x="${padLeft - 10}" y="${gy + 4}" text-anchor="end" font-size="11" fill="var(--text-faint)">${(i * gridStep).toLocaleString('zh-TW')}</text>`;
+    }
+  }
+
+  const bars = sites.map((s, i) => {
+    const x = padLeft + i * (barW + gap) + gap / 2;
+    const barY = y(s.total);
+    const h = Math.max(padTop + plotH - barY, s.total > 0 ? 2 : 0);
+    const short = s.site_name.length > 7 ? `${s.site_name.slice(0, 7)}…` : s.site_name;
+    return `
+      <g class="bar-hit" data-index="${i}" style="cursor:pointer;">
+        <title>${escapeHtml(s.site_name)}：NT$ ${money(s.total)}（${s.order_count} 張單）</title>
+        <rect x="${x}" y="${padTop}" width="${barW}" height="${plotH}" fill="transparent"></rect>
+        <rect x="${x}" y="${barY}" width="${barW}" height="${h}" rx="3" fill="#1D2C6F"></rect>
+        <text x="${x + barW / 2}" y="${barY - 6}" text-anchor="middle" font-size="11" fill="var(--text-secondary)">${money(s.total).replace('.00', '')}</text>
+        <text x="${x + barW / 2}" y="${padTop + plotH + 18}" text-anchor="middle" font-size="11.5" fill="var(--text)">${escapeHtml(short)}</text>
+        ${s.unpriced_count ? `<text x="${x + barW / 2}" y="${padTop + plotH + 34}" text-anchor="middle" font-size="10.5" fill="var(--danger)">${s.unpriced_count} 項未報價</text>` : ''}
+      </g>`;
+  }).join('');
+
+  return `<div style="overflow-x:auto;"><svg width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">
+      ${grid}
+      <line x1="${padLeft}" y1="${padTop + plotH}" x2="${width - padRight}" y2="${padTop + plotH}" stroke="var(--text-faint)"></line>
+      <text x="6" y="${padTop - 8}" font-size="11" fill="var(--text-faint)">金額 (NT$)</text>
+      ${bars}
+    </svg></div>`;
+}
+
+function showSiteDetail(index) {
+  const site = reportSites[index];
+  if (!site) return;
+  const card = document.getElementById('report-detail-card');
+  document.getElementById('report-detail-title').textContent =
+    `${site.site_name}　${site.order_count} 張單　合計 NT$ ${money(site.total)}`;
+  document.getElementById('report-detail-table').innerHTML = `
+    <thead><tr><th>材料</th><th>規格</th><th style="text-align:center;">數量</th><th style="text-align:right;">金額</th></tr></thead>
+    <tbody>${site.items.map((it) => `
+      <tr>
+        <td>${escapeHtml(it.item_name)}</td>
+        <td>${escapeHtml([it.spec, it.color].filter(Boolean).join(' / '))}</td>
+        <td style="text-align:center;">${it.quantity} ${escapeHtml(it.unit || '')}</td>
+        <td style="text-align:right;">${it.unpriced_count ? '<span class="price-missing">未報價</span>' : money(it.amount)}</td>
+      </tr>`).join('')}</tbody>`;
+  card.style.display = '';
+}
+
+// ============================================================
 // 特殊採購審核
 // ============================================================
 function bindSpecialReview() {
@@ -919,27 +1024,42 @@ function bindHistoryPanel() {
 }
 
 const ORDER_STATUS_LABEL = {
-  submitted: '送出訂單',
-  purchasing: '採購處理中',
-  vendor: '廠商處理中',
+  submitted: '收單',
+  sent: '送單',
   issue: '現場回報異常',
-  closed: '已結案',
+  received: '現場已收貨，待確認',
+  closed: '結案',
+  purchasing: '送單', // 舊資料
+  vendor: '送單',     // 舊資料
 };
 const ORDER_STATUS_CLASS = {
   submitted: 'badge-pending',
+  sent: 'badge-pending',
+  issue: 'badge-rejected',
+  received: 'badge-pending',
+  closed: 'badge-approved',
   purchasing: 'badge-pending',
   vendor: 'badge-pending',
-  issue: 'badge-rejected',
-  closed: 'badge-approved',
 };
+// 三個頁籤：收單 / 送單 / 結案。異常與待確認都屬於「送單」，在卡片上另外標色
+const HISTORY_TABS = [
+  { key: 'submitted', label: '收單', statuses: ['submitted'] },
+  { key: 'sent', label: '送單', statuses: ['sent', 'purchasing', 'vendor', 'issue', 'received'] },
+  { key: 'closed', label: '結案', statuses: ['closed'] },
+];
 // 每個狀態底下，後台可以按的「下一步」按鈕
 const ORDER_NEXT_STEPS = {
-  submitted: [{ status: 'purchasing', label: '→ 採購處理中' }],
-  purchasing: [{ status: 'vendor', label: '→ 廠商處理中' }],
+  submitted: [{ status: 'sent', label: '→ 送單' }],
+  sent: [{ status: 'closed', label: '✓ 直接結案' }],
+  purchasing: [{ status: 'sent', label: '→ 送單' }],
   vendor: [{ status: 'closed', label: '✓ 直接結案' }],
   issue: [{ status: 'closed', label: '✓ 處理完成，結案' }],
+  received: [{ status: 'closed', label: '✓ 確認收貨，結案' }],
   closed: [],
 };
+
+let adminOrders = [];
+let adminActiveTab = 'submitted';
 
 // 一張單可能跨廠商：整理出這張單用到的所有廠商
 function vendorSummary(o) {
@@ -952,24 +1072,29 @@ function money(n) {
   return Number(n).toLocaleString('zh-TW', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
-function renderPricingBlock(o) {
+// 品項清單與報價合併成一張表：品項 / 數量 / 廠商 / 牌價 / 折數 / 單價 / 小計
+function renderOrderTable(o) {
   const rows = o.items.map((it) => {
     const sub = (it.unit_price !== null && it.unit_price !== undefined && it.unit_price !== '')
       ? Number(it.unit_price) * it.quantity : null;
     return `
-      <tr>
-        <td>${escapeHtml(it.item_name)} ${[it.spec, it.color].filter(Boolean).map(escapeHtml).join(' / ')}<div class="price-hint" data-item="${it.id}"></div></td>
-        <td style="text-align:center;">${it.quantity} ${escapeHtml(it.unit || '')}</td>
+      <tr${it.has_issue ? ' class="row-issue"' : ''}>
+        <td>
+          ${it.has_issue ? '<span style="color:var(--danger); font-weight:700;">⚠️ </span>' : ''}${escapeHtml(it.item_name)}
+          ${[it.spec, it.color].filter(Boolean).map((x) => `· ${escapeHtml(x)}`).join(' ')}
+          ${it.note ? `<div class="small-note" style="margin:2px 0 0;">備註：${escapeHtml(it.note)}</div>` : ''}
+          <div class="price-hint" data-item="${it.id}"></div>
+        </td>
+        <td style="text-align:center; white-space:nowrap;">${it.quantity} ${escapeHtml(it.unit || '')}</td>
         <td><select class="mini-input price-vendor" data-item="${it.id}" style="min-width:110px;">
           <option value="">—</option>
           ${vendors.map((v) => `<option value="${v.id}" ${v.id === it.vendor_id ? 'selected' : ''}>${escapeHtml(v.name)}</option>`).join('')}
         </select></td>
-        <td><input type="number" step="0.01" min="0" class="price-list" data-item="${it.id}" value="${it.list_price ?? ''}" placeholder="牌價" style="width:90px; padding:4px 6px; border:1px solid var(--border); border-radius:5px; background:var(--surface-sunken);"></td>
-        <td><input type="number" step="0.01" min="0" class="price-disc" data-item="${it.id}" value="${it.discount === null || it.discount === undefined ? '' : Number(it.discount)}" placeholder="75" style="width:70px; padding:4px 6px; border:1px solid var(--border); border-radius:5px; background:var(--surface-sunken);"></td>
+        <td><input type="number" step="0.01" min="0" class="mini-input price-list" data-item="${it.id}" value="${it.list_price ?? ''}" placeholder="牌價" style="width:92px;"></td>
+        <td><input type="number" step="0.01" min="0" class="mini-input price-disc" data-item="${it.id}" value="${it.discount === null || it.discount === undefined ? '' : Number(it.discount)}" placeholder="75" style="width:72px;"></td>
         <td class="price-unit" data-item="${it.id}" style="text-align:right;">${money(it.unit_price)}</td>
         <td class="price-sub" data-item="${it.id}" style="text-align:right;">${money(sub)}</td>
-      </tr>
-    `;
+      </tr>`;
   }).join('');
 
   const total = o.items.reduce((sum, it) => {
@@ -978,20 +1103,25 @@ function renderPricingBlock(o) {
   }, 0);
 
   return `
-    <details class="pricing-block" style="margin-top:10px;">
-      <summary style="cursor:pointer; font-weight:600; font-size:13px; color:var(--text-secondary);">
-        💰 廠商報價 / 材料預估（目前總計 NT$ <span class="price-total" data-id="${o.id}">${money(total)}</span>）
-      </summary>
-      <div style="overflow-x:auto; margin-top:8px;">
-        <table class="table pricing-table" data-id="${o.id}" style="font-size:12.5px;">
-          <thead><tr><th>品項</th><th style="text-align:center;">數量</th><th>廠商</th><th>牌價</th><th>折數 %<br><span style="font-weight:400; font-size:11px;">(75 折填 75)</span></th><th style="text-align:right;">單價</th><th style="text-align:right;">小計</th></tr></thead>
-          <tbody>${rows}</tbody>
-        </table>
-      </div>
-      <button class="btn btn-secondary btn-sm autofill-pricing-btn" data-id="${o.id}" style="margin-top:8px;">📥 自動帶入廠商＋牌價＋折數</button>
-      <button class="btn btn-primary btn-sm save-pricing-btn" data-id="${o.id}" style="margin-top:8px;">儲存報價</button>
-      <p class="small-note">按「自動帶入」會依每個品項的折扣群組找出配合廠商（多家時取主要廠商），再帶入牌價與該廠商當月折數；廠商可逐項改。確認後按「儲存報價」才會存檔。單價 = 牌價 × 折數 ÷ 100（75 折填 75，可超過 100）。</p>
-    </details>
+    <div style="overflow-x:auto; margin-top:10px;">
+      <table class="table pricing-table" data-id="${o.id}" style="font-size:12.5px;">
+        <thead><tr>
+          <th>品項</th><th style="text-align:center;">數量</th><th>廠商</th><th>牌價</th>
+          <th>折數 %<br><span style="font-weight:400; font-size:11px;">(75 折填 75)</span></th>
+          <th style="text-align:right;">單價</th><th style="text-align:right;">小計</th>
+        </tr></thead>
+        <tbody>${rows}</tbody>
+        <tfoot><tr>
+          <td colspan="6" style="text-align:right; font-weight:700;">預估總計</td>
+          <td style="text-align:right; font-weight:700;">NT$ <span class="price-total" data-id="${o.id}">${money(total)}</span></td>
+        </tr></tfoot>
+      </table>
+    </div>
+    <div class="ticket-row" style="gap:8px; flex-wrap:wrap; margin-top:8px;">
+      <button class="btn btn-secondary btn-sm autofill-pricing-btn" data-id="${o.id}">📥 自動帶入廠商＋牌價＋折數</button>
+      <button class="btn btn-primary btn-sm save-pricing-btn" data-id="${o.id}">儲存報價</button>
+    </div>
+    <p class="small-note">「自動帶入」會依每個品項的折扣群組找出配合廠商（多家時取主要廠商），再帶入牌價與該廠商當月折數；廠商可逐項改。單價 = 牌價 × 折數 ÷ 100。</p>
   `;
 }
 
@@ -1004,8 +1134,6 @@ async function loadHistoryPanel() {
   const title = document.getElementById('ah-title').value.trim();
   const from = document.getElementById('ah-from').value;
   const to = document.getElementById('ah-to').value;
-  const statusEl = document.getElementById('ah-status');
-  const status = statusEl ? statusEl.value : '';
   if (name) params.set('name', name);
   if (title) params.set('title', title);
   if (from) params.set('from', from);
@@ -1017,41 +1145,78 @@ async function loadHistoryPanel() {
       Api.get('/api/admin/vendors', true),
     ]);
     vendors = vendorList;
-    let orders = orderList;
-    if (status) orders = orders.filter((o) => (o.status || 'submitted') === status);
+    adminOrders = orderList;
+    renderHistoryTabs();
+    renderHistoryList();
+  } catch (err) {
+    list.innerHTML = `<div class="empty-state"><div class="icon">⚠️</div>${escapeHtml(err.message)}</div>`;
+  }
+}
 
-    if (!orders.length) {
-      list.innerHTML = `<div class="empty-state"><div class="icon">📭</div>沒有符合條件的叫料紀錄</div>`;
-      return;
-    }
+function ordersOfTab(key) {
+  const tab = HISTORY_TABS.find((t) => t.key === key);
+  return adminOrders.filter((o) => tab.statuses.includes(o.status || 'submitted'));
+}
 
-    list.innerHTML = orders.map((o) => {
-      const st = o.status || 'submitted';
-      const nextSteps = ORDER_NEXT_STEPS[st] || [];
-      return `
-      <div class="ticket">
-        <div class="ticket-head">
+function renderHistoryTabs() {
+  const wrap = document.getElementById('ah-status-tabs');
+  wrap.className = 'status-tabs';
+  wrap.innerHTML = HISTORY_TABS.map((t) => {
+    const list = ordersOfTab(t.key);
+    // 送單頁籤另外提醒：現場已回報收貨、等後台確認的張數
+    const waiting = t.key === 'sent' ? list.filter((o) => o.status === 'received').length : 0;
+    const issues = t.key === 'sent' ? list.filter((o) => o.status === 'issue').length : 0;
+    return `<button type="button" class="status-tab${t.key === adminActiveTab ? ' active' : ''}" data-tab="${t.key}">
+      ${t.label}<span class="count">${list.length}</span>
+      ${waiting ? `<span class="count alert">待確認 ${waiting}</span>` : ''}
+      ${issues ? `<span class="count danger">異常 ${issues}</span>` : ''}
+    </button>`;
+  }).join('');
+  wrap.querySelectorAll('.status-tab').forEach((btn) => btn.addEventListener('click', () => {
+    adminActiveTab = btn.dataset.tab;
+    renderHistoryTabs();
+    renderHistoryList();
+  }));
+}
+
+function renderHistoryList() {
+  const list = document.getElementById('admin-history-list');
+  const orders = ordersOfTab(adminActiveTab);
+  if (!orders.length) {
+    list.innerHTML = `<div class="empty-state"><div class="icon">📭</div>這個狀態底下沒有叫料紀錄</div>`;
+    return;
+  }
+
+  list.innerHTML = orders.map((o) => {
+    const st = o.status || 'submitted';
+    const nextSteps = ORDER_NEXT_STEPS[st] || [];
+    const itemCount = o.items.reduce((sum, it) => sum + it.quantity, 0);
+    const total = o.items.reduce((sum, it) => {
+      const up = Number(it.unit_price);
+      return sum + (isNaN(up) || it.unit_price === null ? 0 : up * it.quantity);
+    }, 0);
+    return `
+    <div class="ticket${st === 'received' ? ' ticket-waiting' : ''}${st === 'issue' ? ' ticket-issue' : ''}" data-order-id="${o.id}">
+      <div class="ticket-summary">
+        <div>
           <span class="ticket-no">單號 #${String(o.id).padStart(5, '0')}</span>
-          <span>
-            <span class="badge ${ORDER_STATUS_CLASS[st]}">${ORDER_STATUS_LABEL[st]}</span>
-            <span class="ticket-meta" style="margin-left:8px;">${escapeHtml(o.created_at)}</span>
-          </span>
-        </div>
-        <div class="ticket-row"><span class="name">${escapeHtml(o.requester_name)}　<span class="sub">${escapeHtml(o.title)}${o.phone ? ' · ' + escapeHtml(o.phone) : ''}</span></span></div>
-        <div class="ticket-row sub">
-          案場：${escapeHtml(o.site_name || '-')}　需求日：${escapeHtml(o.need_date || '-')}　類別：${escapeHtml(o.delivery_type || '-')}
-        </div>
-        <div class="ticket-row sub">送貨地址：${escapeHtml(o.site_address || '-')}　施工用途：${escapeHtml(o.purpose || '-')}</div>
-        ${o.items.map((it) => `
-          <div class="ticket-row">
-            <span class="name">${it.has_issue ? '<span style="color:var(--danger); font-weight:700;">⚠️ </span>' : ''}${escapeHtml(it.item_name)} ${[it.spec, it.color].filter(Boolean).map((s) => `· ${escapeHtml(s)}`).join(' ')}</span>
-            <span class="sub">x${it.quantity} ${escapeHtml(it.unit || '')}</span>
+          <span class="badge ${ORDER_STATUS_CLASS[st]}" style="margin-left:8px;">${ORDER_STATUS_LABEL[st]}</span>
+          <div class="ticket-row sub" style="margin-top:4px;">
+            ${escapeHtml(o.requester_name)}　${escapeHtml(o.site_name || '-')}　共 ${o.items.length} 項 / ${itemCount} 件　預估 NT$ ${money(total) || '0.00'}　${escapeHtml(o.created_at)}
           </div>
-          ${it.note ? `<div class="ticket-row sub" style="padding-left:12px;">　備註：${escapeHtml(it.note)}</div>` : ''}
-        `).join('')}
-        ${o.note ? `<div class="ticket-row sub" style="margin-top:6px;">訂單備註：${escapeHtml(o.note)}</div>` : ''}
+        </div>
+        <span class="expand-icon">▾</span>
+      </div>
+      <div class="ticket-detail">
+        <div class="ticket-row"><span class="name">${escapeHtml(o.requester_name)}　<span class="sub">${escapeHtml(o.title)}${o.phone ? ' · ' + escapeHtml(o.phone) : ''}</span></span></div>
+        <div class="ticket-row sub">案場：${escapeHtml(o.site_name || '-')}　需求日：${escapeHtml(o.need_date || '-')}　類別：${escapeHtml(o.delivery_type || '-')}</div>
+        <div class="ticket-row sub">送貨地址：${escapeHtml(o.site_address || '-')}　施工用途：${escapeHtml(o.purpose || '-')}</div>
+        <div class="ticket-row sub">廠商：${escapeHtml(vendorSummary(o)) || '（尚未指定，請在下表逐項選擇）'}</div>
+        ${o.note ? `<div class="ticket-row sub">訂單備註：${escapeHtml(o.note)}</div>` : ''}
+        ${o.issue_note ? `<div class="ticket-row sub" style="color:var(--danger);">⚠️ 現場回報異常：${escapeHtml(o.issue_note)}</div>` : ''}
+        ${st === 'received' ? `<div class="ticket-row sub" style="color:var(--brand-gold, #b8860b);">📦 現場已回報收貨無異常，請確認後結案</div>` : ''}
 
-        ${o.issue_note ? `<div class="ticket-row sub" style="margin-top:8px; color:var(--danger);">⚠️ 現場回報異常：${escapeHtml(o.issue_note)}</div>` : ''}
+        ${renderOrderTable(o)}
 
         ${st === 'issue' || o.purchase_reply ? `
           <div class="field" style="margin-top:8px;">
@@ -1061,25 +1226,20 @@ async function loadHistoryPanel() {
           </div>
         ` : ''}
 
-        <div class="ticket-row" style="margin-top:10px; gap:8px; align-items:center; flex-wrap:wrap;">
-          <span class="small-note" style="margin:0;">廠商：${escapeHtml(vendorSummary(o)) || '（尚未指定，請在下方報價區逐項選擇）'}</span>
-        </div>
-
-        ${renderPricingBlock(o)}
-
         <div class="ticket-row" style="margin-top:10px; gap:8px; flex-wrap:wrap;">
-          ${nextSteps.map((s) => `<button class="btn btn-primary btn-sm status-btn" data-id="${o.id}" data-status="${s.status}">${s.label}</button>`).join('')}
+          ${nextSteps.map((x) => `<button class="btn btn-primary btn-sm status-btn" data-id="${o.id}" data-status="${x.status}">${x.label}</button>`).join('')}
           <button class="btn btn-secondary btn-sm print-order-btn" data-id="${o.id}" data-mode="vendor">🖨️ 廠商訂購單（不含價格）</button>
           <button class="btn btn-secondary btn-sm print-order-btn" data-id="${o.id}" data-mode="internal">🖨️ 內部核簽單（含價格）</button>
         </div>
       </div>
-    `;
-    }).join('');
+    </div>`;
+  }).join('');
 
-    bindHistoryActions(list);
-  } catch (err) {
-    list.innerHTML = `<div class="empty-state"><div class="icon">⚠️</div>${escapeHtml(err.message)}</div>`;
-  }
+  // 點摘要列展開／收合；表單元件上的點擊不要觸發收合
+  list.querySelectorAll('.ticket-summary').forEach((el) => el.addEventListener('click', () => {
+    el.closest('.ticket').classList.toggle('expanded');
+  }));
+  bindHistoryActions(list);
 }
 
 function bindHistoryActions(list) {
@@ -1169,7 +1329,16 @@ function bindHistoryActions(list) {
     try {
       await Api.put(`/api/admin/orders/${btn.dataset.id}/pricing`, { items }, true);
       showToast('報價已儲存', 'success');
-      loadHistoryPanel();
+      // 重新查詢會收合卡片，所以只更新這筆在記憶體裡的資料與畫面上的摘要
+      const fresh = await Api.get(`/api/admin/orders/${btn.dataset.id}`, true);
+      const idx = adminOrders.findIndex((o) => o.id === fresh.id);
+      if (idx >= 0) adminOrders[idx] = fresh;
+      const ticket = list.querySelector(`.ticket[data-order-id="${fresh.id}"]`);
+      if (ticket) {
+        const sub = ticket.querySelector('.ticket-summary .sub');
+        const total = fresh.items.reduce((sum, it) => sum + (Number(it.unit_price) || 0) * it.quantity, 0);
+        if (sub) sub.innerHTML = sub.innerHTML.replace(/預估 NT\$ [\d,.]+/, `預估 NT$ ${money(total)}`);
+      }
     } catch (err) { showToast(err.message, 'error'); }
   }));
 }

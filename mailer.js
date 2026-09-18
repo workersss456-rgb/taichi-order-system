@@ -121,6 +121,11 @@ async function notifyOrderStatusEvent({ order, eventType, extra }) {
       heading: '現場收貨回報異常，需要採購處理',
       extraLabel: '異常說明',
     },
+    received: {
+      subject: `【叫料系統】訂單 ${orderNo} 現場已收貨，待後台確認結案`,
+      heading: '現場回報收貨完成，等待後台確認結案',
+      extraLabel: '說明',
+    },
     closed: {
       subject: `【叫料系統】訂單 ${orderNo} 已結案`,
       heading: '訂單已完成結案',

@@ -302,11 +302,11 @@ router.put('/orders/:id/vendor', async (req, res) => {
   }
 });
 
-// ---------- 訂單狀態流程 ----------
-// submitted 送出訂單 → purchasing 採購處理中 → vendor 廠商處理中
-//   → closed 已結案（現場收貨無異常）
-//   或 issue 現場回報異常 → 採購回報處理內容 → closed 已結案
-const ORDER_STATUSES = ['submitted', 'purchasing', 'vendor', 'issue', 'closed'];
+// ---------- 訂單狀態流程（三階段） ----------
+// submitted 收單 → sent 送單 ┬→ received 現場已收貨（待後台確認）→ closed 結案
+//                            └→ issue 現場回報異常 → 採購處理 → closed 結案
+// purchasing / vendor 是舊制狀態，已由資料轉換合併成 sent，這裡保留以免舊資料出錯
+const ORDER_STATUSES = ['submitted', 'sent', 'issue', 'received', 'closed', 'purchasing', 'vendor'];
 
 router.put('/orders/:id/status', async (req, res) => {
   try {
@@ -855,6 +855,56 @@ router.get('/orders/:id', async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: '查詢叫料單失敗' });
+  }
+});
+
+// ============================================================
+// 案場統計：某個月各案場的材料與預估金額
+// 金額 = 已報價品項的小計加總；還沒報價的品項算 0，另外回報筆數提醒
+// ============================================================
+router.get('/site-summary', async (req, res) => {
+  try {
+    const month = req.query.month;
+    if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month || '')) {
+      return res.status(400).json({ error: '月份格式不正確（YYYY-MM）' });
+    }
+    const rows = (await pool.query(
+      `SELECT COALESCE(NULLIF(o.site_name, ''), '（未填案場）') AS site_name,
+              oi.item_name, oi.spec, oi.color, oi.unit,
+              SUM(oi.quantity)::int AS quantity,
+              SUM(CASE WHEN oi.unit_price IS NULL THEN 0 ELSE oi.unit_price * oi.quantity END) AS amount,
+              SUM(CASE WHEN oi.unit_price IS NULL THEN 1 ELSE 0 END)::int AS unpriced_count,
+              COUNT(DISTINCT o.id)::int AS order_count
+       FROM orders o JOIN order_items oi ON oi.order_id = o.id
+       WHERE TO_CHAR(o.created_at AT TIME ZONE 'Asia/Taipei', 'YYYY-MM') = $1
+       GROUP BY 1,2,3,4,5
+       ORDER BY 1, 7 DESC`, [month]
+    )).rows;
+
+    const sites = [];
+    for (const r of rows) {
+      let site = sites.find((s) => s.site_name === r.site_name);
+      if (!site) { site = { site_name: r.site_name, total: 0, unpriced_count: 0, items: [] }; sites.push(site); }
+      site.total += Number(r.amount);
+      site.unpriced_count += r.unpriced_count;
+      site.items.push({
+        item_name: r.item_name, spec: r.spec, color: r.color, unit: r.unit,
+        quantity: r.quantity, amount: Number(r.amount), unpriced_count: r.unpriced_count,
+      });
+    }
+    sites.forEach((s) => s.items.sort((a, b) => b.amount - a.amount || b.quantity - a.quantity));
+    sites.sort((a, b) => b.total - a.total);
+
+    const orderCounts = (await pool.query(
+      `SELECT COALESCE(NULLIF(site_name, ''), '（未填案場）') AS site_name, COUNT(*)::int AS order_count
+       FROM orders WHERE TO_CHAR(created_at AT TIME ZONE 'Asia/Taipei', 'YYYY-MM') = $1 GROUP BY 1`, [month]
+    )).rows;
+    sites.forEach((s) => { s.order_count = (orderCounts.find((o) => o.site_name === s.site_name) || {}).order_count || 0; });
+
+    res.json({ month, sites });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: '讀取案場統計失敗' });
   }
 });
 
