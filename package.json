@@ -1,14 +1,11 @@
 {
-  "name": "order-system",
+  "name": "billing-system",
   "version": "1.0.0",
-  "description": "内部叫料系统 - 分类商城式叫料 + 特殊设备采购申请",
+  "description": "工程請款／付款核銷系統",
   "main": "server.js",
-  "scripts": {
-    "start": "node server.js"
-  },
+  "scripts": { "start": "node server.js" },
   "dependencies": {
-    "express": "^5.1.0",
-    "nodemailer": "^9.0.5",
-    "pg": "^8.13.1"
+    "express": "^4.19.2",
+    "pg": "^8.11.5"
   }
 }
