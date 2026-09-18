@@ -623,7 +623,13 @@ a { color: var(--primary); }
 .disc-unit { font-size: 12px; color: var(--text-faint); }
 
 /* ---------- 後台歷史紀錄（三階段頁籤 / 合併表格） ---------- */
-.status-tab .count.alert { background: var(--brand-gold, #F4B223); color: #4a3200; }
+.status-tab .count.alert,
+.status-tab .count.danger {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 18px; height: 18px; padding: 0 5px; border-radius: 999px;
+  font-size: 11px; font-weight: 700; opacity: 1;
+}
+.status-tab .count.alert { background: #F4B223; color: #4a3200; }
 .status-tab .count.danger { background: var(--danger); color: #fff; }
 .pricing-table tr.row-issue > td { background: rgba(220, 38, 38, 0.06); }
 .ticket.ticket-waiting { border-left: 3px solid var(--brand-gold, #F4B223); }
@@ -631,3 +637,19 @@ a { color: var(--primary); }
 .pricing-table tfoot td { border-top: 2px solid var(--border); }
 #report-chart svg { display: block; }
 #report-chart .bar-hit:hover rect:nth-of-type(2) { opacity: .82; }
+
+/* ---------- 側邊欄分組與待辦圈圈 ---------- */
+.admin-nav-group { font-size: 11px; letter-spacing: .08em; color: var(--text-faint); margin: 14px 0 4px; padding-left: 4px; }
+.admin-nav-group:first-of-type { margin-top: 0; }
+.admin-nav-item { position: relative; }
+.nav-badge {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 20px; height: 20px; padding: 0 5px; margin-left: 8px;
+  border-radius: 999px; background: var(--danger); color: #fff;
+  font-size: 11.5px; font-weight: 700; line-height: 1;
+}
+/* 異常：整顆標籤紅底；結案：灰底 */
+.badge.badge-issue { background: var(--danger); color: #fff; border-color: var(--danger); }
+.badge.badge-closed { background: #9b9b9b; color: #fff; border-color: #9b9b9b; }
+.badge.badge-voided { background: transparent; color: var(--text-faint); border: 1px dashed var(--border); }
+.ticket.ticket-voided { opacity: .72; border-left: 3px dashed var(--text-faint); }

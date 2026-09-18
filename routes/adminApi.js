@@ -350,6 +350,42 @@ router.put('/orders/:id/purchase-reply', async (req, res) => {
   }
 });
 
+// ---------- 作廢 / 還原（軟刪除：資料保留，不列入清單、CSV 與統計） ----------
+router.put('/orders/:id/void', async (req, res) => {
+  try {
+    const reason = (req.body.reason || '').trim();
+    if (!reason) return res.status(400).json({ error: '請填寫作廢原因' });
+    const current = (await pool.query('SELECT status, voided FROM orders WHERE id = $1', [req.params.id])).rows[0];
+    if (!current) return res.status(404).json({ error: '找不到這筆叫料單' });
+    if (current.voided) return res.status(400).json({ error: '這筆訂單已經作廢了' });
+    if (current.status === 'closed') {
+      return res.status(400).json({ error: '已結案的訂單請先按「退回送單」，再作廢' });
+    }
+    const row = (await pool.query(
+      'UPDATE orders SET voided = true, void_reason = $1, voided_at = NOW() WHERE id = $2 RETURNING id',
+      [reason, req.params.id]
+    )).rows[0];
+    res.json({ ok: true, id: row.id });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: '作廢失敗' });
+  }
+});
+
+router.put('/orders/:id/restore', async (req, res) => {
+  try {
+    const row = (await pool.query(
+      'UPDATE orders SET voided = false, void_reason = NULL, voided_at = NULL WHERE id = $1 RETURNING id',
+      [req.params.id]
+    )).rows[0];
+    if (!row) return res.status(404).json({ error: '找不到這筆叫料單' });
+    res.json({ ok: true, id: row.id });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: '還原失敗' });
+  }
+});
+
 // ---------- 廠商報價（採購填寫，單價 = 牌價 × 折數） ----------
 router.put('/orders/:id/pricing', async (req, res) => {
   const { items } = req.body;
@@ -396,6 +432,17 @@ router.put('/orders/:id/pricing', async (req, res) => {
 });
 
 // ---------- 特殊設備採購審核 ----------
+// 待審核筆數（側邊欄的紅色圈圈）
+router.get('/special-requests/pending-count', async (req, res) => {
+  try {
+    const row = (await pool.query("SELECT COUNT(*)::int AS c FROM special_requests WHERE status = 'pending'")).rows[0];
+    res.json({ count: row.c });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: '讀取待審核筆數失敗' });
+  }
+});
+
 router.put('/special-requests/:id', async (req, res) => {
   try {
     const { status, reviewer_note } = req.body;
@@ -411,6 +458,29 @@ router.put('/special-requests/:id', async (req, res) => {
     )).rows[0];
     row.created_at = row.created_at_fmt; delete row.created_at_fmt;
     row.reviewed_at = row.reviewed_at_fmt; delete row.reviewed_at_fmt;
+
+    // 核准後直接轉成一張叫料單，進入歷史紀錄的「收單」
+    if (status === 'approved' && !row.order_id) {
+      const order = (await pool.query(
+        `INSERT INTO orders (requester_name, title, phone, email, site_name, site_address, purpose,
+                             delivery_type, need_date, note, status)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'submitted') RETURNING id`,
+        [
+          row.requester_name, row.title, row.phone || '', row.email || '',
+          (req.body.site_name || '').trim(), (req.body.site_address || '').trim(),
+          row.purpose || '', '訂貨', req.body.need_date || null,
+          `由特殊採購申請 #${String(row.id).padStart(5, '0')} 核准轉入${row.note ? `／${row.note}` : ''}`,
+        ]
+      )).rows[0];
+      await pool.query(
+        `INSERT INTO order_items (order_id, item_id, item_name, spec, color, unit, quantity, note)
+         VALUES ($1, NULL, $2, '', '', '個', $3, $4)`,
+        [order.id, row.item_name, row.quantity || 1, row.vendor ? `建議廠商：${row.vendor}` : '']
+      );
+      await pool.query('UPDATE special_requests SET order_id = $1 WHERE id = $2', [order.id, row.id]);
+      row.order_id = order.id;
+    }
+
     res.json(row);
   } catch (err) {
     console.error(err);
@@ -424,11 +494,11 @@ router.get('/orders/export.csv', async (req, res) => {
     const orders = (await pool.query(
       `SELECT *, TO_CHAR(created_at AT TIME ZONE 'Asia/Taipei', 'YYYY-MM-DD HH24:MI:SS') AS created_at_fmt,
                  TO_CHAR(need_date, 'YYYY-MM-DD') AS need_date_fmt
-       FROM orders ORDER BY id DESC`
+       FROM orders WHERE voided IS NOT TRUE ORDER BY id DESC`
     )).rows;
 
     const rows = [['單號', '狀態', '申請人', '職稱', '聯絡手機', '需求日', '案場名稱', '送貨地址', '施工用途', '類別', '廠商', '時間', '品項', '規格', '顏色', '數量', '單位', '牌價', '折數', '單價', '小計', '品項備註', '訂單備註', '異常說明', '採購處理內容']];
-    const STATUS_TEXT = { submitted: '送出訂單', purchasing: '採購處理中', vendor: '廠商處理中', issue: '現場回報異常', closed: '已結案' };
+    const STATUS_TEXT = { submitted: '收單', sent: '送單', issue: '現場回報異常', received: '現場已收貨待確認', closed: '結案', purchasing: '送單', vendor: '送單' };
     for (const o of orders) {
       const items = (await pool.query('SELECT * FROM order_items WHERE order_id = $1', [o.id])).rows;
       for (const it of items) {
@@ -877,6 +947,7 @@ router.get('/site-summary', async (req, res) => {
               COUNT(DISTINCT o.id)::int AS order_count
        FROM orders o JOIN order_items oi ON oi.order_id = o.id
        WHERE TO_CHAR(o.created_at AT TIME ZONE 'Asia/Taipei', 'YYYY-MM') = $1
+         AND o.status = 'closed' AND o.voided IS NOT TRUE
        GROUP BY 1,2,3,4,5
        ORDER BY 1, 7 DESC`, [month]
     )).rows;
@@ -897,7 +968,8 @@ router.get('/site-summary', async (req, res) => {
 
     const orderCounts = (await pool.query(
       `SELECT COALESCE(NULLIF(site_name, ''), '（未填案場）') AS site_name, COUNT(*)::int AS order_count
-       FROM orders WHERE TO_CHAR(created_at AT TIME ZONE 'Asia/Taipei', 'YYYY-MM') = $1 GROUP BY 1`, [month]
+       FROM orders WHERE TO_CHAR(created_at AT TIME ZONE 'Asia/Taipei', 'YYYY-MM') = $1
+         AND status = 'closed' AND voided IS NOT TRUE GROUP BY 1`, [month]
     )).rows;
     sites.forEach((s) => { s.order_count = (orderCounts.find((o) => o.site_name === s.site_name) || {}).order_count || 0; });
 

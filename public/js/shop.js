@@ -457,16 +457,17 @@ const ORDER_STATUS_LABEL = {
 const ORDER_STATUS_CLASS = {
   submitted: 'badge-pending',
   sent: 'badge-pending',
-  issue: 'badge-rejected',
+  issue: 'badge-issue',
   received: 'badge-pending',
-  closed: 'badge-approved',
+  closed: 'badge-closed',
   purchasing: 'badge-pending',
   vendor: 'badge-pending',
 };
-// 三個頁籤：收單 / 送單 / 結案（異常與待確認都歸在送單）
+// 四個頁籤：收單 / 送單 / 異常 / 結案
 const HISTORY_TABS = [
   { key: 'submitted', label: '收單', statuses: ['submitted'] },
-  { key: 'sent', label: '送單', statuses: ['sent', 'purchasing', 'vendor', 'issue', 'received'] },
+  { key: 'sent', label: '送單', statuses: ['sent', 'purchasing', 'vendor', 'received'] },
+  { key: 'issue', label: '異常', statuses: ['issue'] },
   { key: 'closed', label: '結案', statuses: ['closed'] },
 ];
 
@@ -501,7 +502,8 @@ function renderHistoryTabs() {
   wrap.className = 'status-tabs';
   wrap.innerHTML = HISTORY_TABS.map((t) => {
     const count = historyOrders.filter((o) => t.statuses.includes(o.status || 'submitted')).length;
-    return `<button type="button" class="status-tab${t.key === historyActiveTab ? ' active' : ''}" data-tab="${t.key}">${t.label}<span class="count">${count}</span></button>`;
+    const cls = t.key === 'issue' && count ? ' danger' : '';
+    return `<button type="button" class="status-tab${t.key === historyActiveTab ? ' active' : ''}" data-tab="${t.key}">${t.label}<span class="count${cls}">${count}</span></button>`;
   }).join('');
 
   wrap.querySelectorAll('.status-tab').forEach((btn) => btn.addEventListener('click', () => {

@@ -228,7 +228,7 @@ router.get('/orders', async (req, res) => {
     const { name, title, from, to } = req.query;
     let sql = `SELECT *, TO_CHAR(created_at AT TIME ZONE 'Asia/Taipei', 'YYYY-MM-DD HH24:MI:SS') AS created_at_fmt,
                  TO_CHAR(need_date, 'YYYY-MM-DD') AS need_date_fmt
-               FROM orders WHERE 1=1`;
+               FROM orders WHERE voided IS NOT TRUE`;
     const params = [];
 
     if (name) { params.push(`%${name}%`); sql += ` AND requester_name ILIKE $${params.length}`; }

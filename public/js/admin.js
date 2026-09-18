@@ -12,6 +12,7 @@ document.addEventListener('DOMContentLoaded', () => {
   bindSiteManagement();
   bindPricingPanel();
   bindReportPanel();
+  bindApproveModal();
   bindSpecialReview();
   bindHistoryPanel();
 
@@ -62,6 +63,7 @@ function enterAdmin() {
   loadCatalogManagement();
   loadPricingPanel();
   loadReportPanel();
+  refreshSpecialBadge();
   loadSiteManagement();
   loadSpecialReview();
   loadHistoryPanel();
@@ -997,7 +999,9 @@ async function loadSpecialReview() {
       </div>
     `).join('');
 
-    list.querySelectorAll('[data-approve]').forEach((btn) => btn.addEventListener('click', () => reviewRequest(btn.dataset.approve, 'approved')));
+    list.querySelectorAll('[data-approve]').forEach((btn) => btn.addEventListener('click', () => {
+      openApproveModal(reqs.find((x) => x.id === +btn.dataset.approve));
+    }));
     list.querySelectorAll('[data-reject]').forEach((btn) => btn.addEventListener('click', () => reviewRequest(btn.dataset.reject, 'rejected')));
   } catch (err) {
     list.innerHTML = `<div class="empty-state"><div class="icon">⚠️</div>${escapeHtml(err.message)}</div>`;
@@ -1005,14 +1009,64 @@ async function loadSpecialReview() {
 }
 
 async function reviewRequest(id, status) {
-  const note = prompt(status === 'approved' ? '核准意見（選填）：' : '拒絕原因（選填）：', '') || '';
+  const note = prompt('拒絕原因（選填）：', '') || '';
   try {
     await Api.put(`/api/admin/special-requests/${id}`, { status, reviewer_note: note }, true);
     loadSpecialReview();
-    showToast(status === 'approved' ? '已核准申請' : '已拒絕申請', 'success');
+    refreshSpecialBadge();
+    showToast('已拒絕申請', 'success');
   } catch (err) {
     showToast(err.message, 'error');
   }
+}
+
+// ---------- 核准 → 直接轉成一張叫料單（進入歷史紀錄的「收單」） ----------
+function openApproveModal(r) {
+  if (!r) return;
+  document.getElementById('approve-request-id').value = r.id;
+  document.getElementById('approve-summary').textContent =
+    `申請 #${String(r.id).padStart(5, '0')}　${r.item_name} x${r.quantity}　申請人：${r.requester_name}`;
+  const siteSel = document.getElementById('approve-site');
+  siteSel.innerHTML = '<option value="">（不指定）</option>'
+    + sites.map((x) => `<option value="${escapeAttr(x.name)}" data-address="${escapeAttr(x.address || '')}">${escapeHtml(x.name)}</option>`).join('');
+  document.getElementById('approve-need-date').value = '';
+  document.getElementById('approve-note').value = '';
+  document.getElementById('approve-modal').style.display = 'flex';
+}
+
+function bindApproveModal() {
+  document.getElementById('approve-cancel').addEventListener('click', () => {
+    document.getElementById('approve-modal').style.display = 'none';
+  });
+  document.getElementById('approve-submit').addEventListener('click', async () => {
+    const id = document.getElementById('approve-request-id').value;
+    const siteSel = document.getElementById('approve-site');
+    const payload = {
+      status: 'approved',
+      reviewer_note: document.getElementById('approve-note').value.trim(),
+      site_name: siteSel.value,
+      site_address: siteSel.selectedOptions[0] ? (siteSel.selectedOptions[0].dataset.address || '') : '',
+      need_date: document.getElementById('approve-need-date').value || null,
+    };
+    try {
+      const result = await Api.put(`/api/admin/special-requests/${id}`, payload, true);
+      document.getElementById('approve-modal').style.display = 'none';
+      showToast(`已核准，並建立叫料單 #${String(result.order_id).padStart(5, '0')}`, 'success');
+      loadSpecialReview();
+      refreshSpecialBadge();
+      loadHistoryPanel();
+    } catch (err) { showToast(err.message, 'error'); }
+  });
+}
+
+// 側邊欄「特殊採購審核」旁的紅色待辦圈圈
+async function refreshSpecialBadge() {
+  try {
+    const { count } = await Api.get('/api/admin/special-requests/pending-count', true);
+    const badge = document.getElementById('special-badge');
+    badge.textContent = count;
+    badge.style.display = count ? 'inline-flex' : 'none';
+  } catch (err) { /* 徽章載入失敗不影響其他操作 */ }
 }
 
 // ============================================================
@@ -1035,17 +1089,19 @@ const ORDER_STATUS_LABEL = {
 const ORDER_STATUS_CLASS = {
   submitted: 'badge-pending',
   sent: 'badge-pending',
-  issue: 'badge-rejected',
+  issue: 'badge-issue',
   received: 'badge-pending',
-  closed: 'badge-approved',
+  closed: 'badge-closed',
   purchasing: 'badge-pending',
   vendor: 'badge-pending',
 };
-// 三個頁籤：收單 / 送單 / 結案。異常與待確認都屬於「送單」，在卡片上另外標色
+// 四個頁籤：收單 / 送單 / 異常 / 結案，另外一個「已作廢」放最後
 const HISTORY_TABS = [
   { key: 'submitted', label: '收單', statuses: ['submitted'] },
-  { key: 'sent', label: '送單', statuses: ['sent', 'purchasing', 'vendor', 'issue', 'received'] },
+  { key: 'sent', label: '送單', statuses: ['sent', 'purchasing', 'vendor', 'received'] },
+  { key: 'issue', label: '異常', statuses: ['issue'] },
   { key: 'closed', label: '結案', statuses: ['closed'] },
+  { key: 'voided', label: '已作廢', statuses: [] },
 ];
 // 每個狀態底下，後台可以按的「下一步」按鈕
 const ORDER_NEXT_STEPS = {
@@ -1055,7 +1111,7 @@ const ORDER_NEXT_STEPS = {
   vendor: [{ status: 'closed', label: '✓ 直接結案' }],
   issue: [{ status: 'closed', label: '✓ 處理完成，結案' }],
   received: [{ status: 'closed', label: '✓ 確認收貨，結案' }],
-  closed: [],
+  closed: [{ status: 'sent', label: '↩ 退回送單' }],
 };
 
 let adminOrders = [];
@@ -1074,6 +1130,7 @@ function money(n) {
 
 // 品項清單與報價合併成一張表：品項 / 數量 / 廠商 / 牌價 / 折數 / 單價 / 小計
 function renderOrderTable(o) {
+  const ro = o.voided ? ' disabled' : ''; // 作廢的單只能看，不能改報價
   const rows = o.items.map((it) => {
     const sub = (it.unit_price !== null && it.unit_price !== undefined && it.unit_price !== '')
       ? Number(it.unit_price) * it.quantity : null;
@@ -1086,12 +1143,12 @@ function renderOrderTable(o) {
           <div class="price-hint" data-item="${it.id}"></div>
         </td>
         <td style="text-align:center; white-space:nowrap;">${it.quantity} ${escapeHtml(it.unit || '')}</td>
-        <td><select class="mini-input price-vendor" data-item="${it.id}" style="min-width:110px;">
+        <td><select class="mini-input price-vendor" data-item="${it.id}" style="min-width:110px;"${ro}>
           <option value="">—</option>
           ${vendors.map((v) => `<option value="${v.id}" ${v.id === it.vendor_id ? 'selected' : ''}>${escapeHtml(v.name)}</option>`).join('')}
         </select></td>
-        <td><input type="number" step="0.01" min="0" class="mini-input price-list" data-item="${it.id}" value="${it.list_price ?? ''}" placeholder="牌價" style="width:92px;"></td>
-        <td><input type="number" step="0.01" min="0" class="mini-input price-disc" data-item="${it.id}" value="${it.discount === null || it.discount === undefined ? '' : Number(it.discount)}" placeholder="75" style="width:72px;"></td>
+        <td><input type="number" step="0.01" min="0" class="mini-input price-list" data-item="${it.id}" value="${it.list_price ?? ''}" placeholder="牌價" style="width:92px;"${ro}></td>
+        <td><input type="number" step="0.01" min="0" class="mini-input price-disc" data-item="${it.id}" value="${it.discount === null || it.discount === undefined ? '' : Number(it.discount)}" placeholder="75" style="width:72px;"${ro}></td>
         <td class="price-unit" data-item="${it.id}" style="text-align:right;">${money(it.unit_price)}</td>
         <td class="price-sub" data-item="${it.id}" style="text-align:right;">${money(sub)}</td>
       </tr>`;
@@ -1117,10 +1174,10 @@ function renderOrderTable(o) {
         </tr></tfoot>
       </table>
     </div>
-    <div class="ticket-row" style="gap:8px; flex-wrap:wrap; margin-top:8px;">
+    ${o.voided ? '' : `<div class="ticket-row" style="gap:8px; flex-wrap:wrap; margin-top:8px;">
       <button class="btn btn-secondary btn-sm autofill-pricing-btn" data-id="${o.id}">📥 自動帶入廠商＋牌價＋折數</button>
       <button class="btn btn-primary btn-sm save-pricing-btn" data-id="${o.id}">儲存報價</button>
-    </div>
+    </div>`}
     <p class="small-note">「自動帶入」會依每個品項的折扣群組找出配合廠商（多家時取主要廠商），再帶入牌價與該廠商當月折數；廠商可逐項改。單價 = 牌價 × 折數 ÷ 100。</p>
   `;
 }
@@ -1154,8 +1211,9 @@ async function loadHistoryPanel() {
 }
 
 function ordersOfTab(key) {
+  if (key === 'voided') return adminOrders.filter((o) => o.voided);
   const tab = HISTORY_TABS.find((t) => t.key === key);
-  return adminOrders.filter((o) => tab.statuses.includes(o.status || 'submitted'));
+  return adminOrders.filter((o) => !o.voided && tab.statuses.includes(o.status || 'submitted'));
 }
 
 function renderHistoryTabs() {
@@ -1165,11 +1223,10 @@ function renderHistoryTabs() {
     const list = ordersOfTab(t.key);
     // 送單頁籤另外提醒：現場已回報收貨、等後台確認的張數
     const waiting = t.key === 'sent' ? list.filter((o) => o.status === 'received').length : 0;
-    const issues = t.key === 'sent' ? list.filter((o) => o.status === 'issue').length : 0;
+    const countClass = t.key === 'issue' && list.length ? ' danger' : '';
     return `<button type="button" class="status-tab${t.key === adminActiveTab ? ' active' : ''}" data-tab="${t.key}">
-      ${t.label}<span class="count">${list.length}</span>
+      ${t.label}<span class="count${countClass}">${list.length}</span>
       ${waiting ? `<span class="count alert">待確認 ${waiting}</span>` : ''}
-      ${issues ? `<span class="count danger">異常 ${issues}</span>` : ''}
     </button>`;
   }).join('');
   wrap.querySelectorAll('.status-tab').forEach((btn) => btn.addEventListener('click', () => {
@@ -1196,11 +1253,11 @@ function renderHistoryList() {
       return sum + (isNaN(up) || it.unit_price === null ? 0 : up * it.quantity);
     }, 0);
     return `
-    <div class="ticket${st === 'received' ? ' ticket-waiting' : ''}${st === 'issue' ? ' ticket-issue' : ''}" data-order-id="${o.id}">
+    <div class="ticket${o.voided ? ' ticket-voided' : ''}${!o.voided && st === 'received' ? ' ticket-waiting' : ''}${!o.voided && st === 'issue' ? ' ticket-issue' : ''}" data-order-id="${o.id}">
       <div class="ticket-summary">
         <div>
           <span class="ticket-no">單號 #${String(o.id).padStart(5, '0')}</span>
-          <span class="badge ${ORDER_STATUS_CLASS[st]}" style="margin-left:8px;">${ORDER_STATUS_LABEL[st]}</span>
+          <span class="badge ${o.voided ? 'badge-voided' : ORDER_STATUS_CLASS[st]}" style="margin-left:8px;">${o.voided ? '已作廢' : ORDER_STATUS_LABEL[st]}</span>
           <div class="ticket-row sub" style="margin-top:4px;">
             ${escapeHtml(o.requester_name)}　${escapeHtml(o.site_name || '-')}　共 ${o.items.length} 項 / ${itemCount} 件　預估 NT$ ${money(total) || '0.00'}　${escapeHtml(o.created_at)}
           </div>
@@ -1214,11 +1271,12 @@ function renderHistoryList() {
         <div class="ticket-row sub">廠商：${escapeHtml(vendorSummary(o)) || '（尚未指定，請在下表逐項選擇）'}</div>
         ${o.note ? `<div class="ticket-row sub">訂單備註：${escapeHtml(o.note)}</div>` : ''}
         ${o.issue_note ? `<div class="ticket-row sub" style="color:var(--danger);">⚠️ 現場回報異常：${escapeHtml(o.issue_note)}</div>` : ''}
-        ${st === 'received' ? `<div class="ticket-row sub" style="color:var(--brand-gold, #b8860b);">📦 現場已回報收貨無異常，請確認後結案</div>` : ''}
+        ${st === 'received' && !o.voided ? `<div class="ticket-row sub" style="color:#b8860b;">📦 現場已回報收貨無異常，請確認後結案</div>` : ''}
+        ${o.voided ? `<div class="ticket-row sub">🚫 已作廢：${escapeHtml(o.void_reason || '')}</div>` : ''}
 
         ${renderOrderTable(o)}
 
-        ${st === 'issue' || o.purchase_reply ? `
+        ${(st === 'issue' || o.purchase_reply) && !o.voided ? `
           <div class="field" style="margin-top:8px;">
             <label>採購處理內容</label>
             <textarea class="reply-input" data-id="${o.id}" placeholder="說明如何處理這個異常…">${escapeHtml(o.purchase_reply || '')}</textarea>
@@ -1227,9 +1285,12 @@ function renderHistoryList() {
         ` : ''}
 
         <div class="ticket-row" style="margin-top:10px; gap:8px; flex-wrap:wrap;">
-          ${nextSteps.map((x) => `<button class="btn btn-primary btn-sm status-btn" data-id="${o.id}" data-status="${x.status}">${x.label}</button>`).join('')}
+          ${o.voided ? '' : nextSteps.map((x) => `<button class="btn btn-primary btn-sm status-btn" data-id="${o.id}" data-status="${x.status}">${x.label}</button>`).join('')}
           <button class="btn btn-secondary btn-sm print-order-btn" data-id="${o.id}" data-mode="vendor">🖨️ 廠商訂購單（不含價格）</button>
           <button class="btn btn-secondary btn-sm print-order-btn" data-id="${o.id}" data-mode="internal">🖨️ 內部核簽單（含價格）</button>
+          ${o.voided
+            ? `<button class="btn btn-secondary btn-sm restore-btn" data-id="${o.id}">↩ 還原</button>`
+            : `<button class="btn btn-danger btn-sm void-btn" data-id="${o.id}">🚫 作廢</button>`}
         </div>
       </div>
     </div>`;
@@ -1243,6 +1304,28 @@ function renderHistoryList() {
 }
 
 function bindHistoryActions(list) {
+  list.querySelectorAll('.void-btn').forEach((btn) => btn.addEventListener('click', async () => {
+    const reason = prompt('請填寫作廢原因（例如：測試單、重複下單、下錯案場）：', '');
+    if (reason === null) return;
+    if (!reason.trim()) return showToast('請填寫作廢原因', 'error');
+    try {
+      await Api.put(`/api/admin/orders/${btn.dataset.id}/void`, { reason: reason.trim() }, true);
+      showToast('已作廢，可在「已作廢」頁籤還原', 'success');
+      loadHistoryPanel();
+      loadReportPanel();
+    } catch (err) { showToast(err.message, 'error'); }
+  }));
+
+  list.querySelectorAll('.restore-btn').forEach((btn) => btn.addEventListener('click', async () => {
+    if (!confirm('要把這筆訂單還原回原本的狀態嗎？')) return;
+    try {
+      await Api.put(`/api/admin/orders/${btn.dataset.id}/restore`, {}, true);
+      showToast('已還原', 'success');
+      loadHistoryPanel();
+      loadReportPanel();
+    } catch (err) { showToast(err.message, 'error'); }
+  }));
+
   list.querySelectorAll('.save-reply-btn').forEach((btn) => btn.addEventListener('click', async () => {
     const ta = list.querySelector(`.reply-input[data-id="${btn.dataset.id}"]`);
     try {

@@ -192,6 +192,14 @@ async function createTables() {
     ALTER TABLE orders ADD COLUMN IF NOT EXISTS vendor_id INTEGER REFERENCES vendors(id) ON DELETE SET NULL;
     -- 同一張叫料單可能跨廠商（例如 PVC 與鋼管不同供應商），廠商記在品項上
     ALTER TABLE order_items ADD COLUMN IF NOT EXISTS vendor_id INTEGER REFERENCES vendors(id) ON DELETE SET NULL;
+
+    -- 作廢（軟刪除）：資料保留，但不出現在一般清單、CSV 與案場統計
+    ALTER TABLE orders ADD COLUMN IF NOT EXISTS voided BOOLEAN DEFAULT false;
+    ALTER TABLE orders ADD COLUMN IF NOT EXISTS void_reason TEXT;
+    ALTER TABLE orders ADD COLUMN IF NOT EXISTS voided_at TIMESTAMPTZ;
+
+    -- 特殊採購核准後會轉成一張叫料單，這裡記住對應的單號
+    ALTER TABLE special_requests ADD COLUMN IF NOT EXISTS order_id INTEGER REFERENCES orders(id) ON DELETE SET NULL;
   `);
 
   await runOnceMigrations();
