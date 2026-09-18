@@ -1,24 +1,33 @@
-// 共用 API 呼叫：自動帶上系統密碼，並把後端的錯誤訊息轉成 Error
-const Api = {
-  headers() {
-    return { 'Content-Type': 'application/json', 'x-app-password': sessionStorage.getItem('appPassword') || '' };
-  },
-  async request(method, url, body) {
-    const opt = { method, headers: Api.headers() };
-    if (body !== undefined) opt.body = JSON.stringify(body);
-    const res = await fetch(url, opt);
+const Api = (() => {
+  function adminHeaders() {
+    const pw = sessionStorage.getItem('adminPassword');
+    if (!pw) return {};
+    return { 'x-admin-password': encodeURIComponent(pw) };
+  }
+
+  async function request(method, url, body, useAdmin) {
+    const opts = { method, headers: {} };
+    if (body !== undefined) {
+      opts.headers['Content-Type'] = 'application/json';
+      opts.body = JSON.stringify(body);
+    }
+    if (useAdmin) Object.assign(opts.headers, adminHeaders());
+
+    const res = await fetch(url, opts);
     let data = null;
-    try { data = await res.json(); } catch (e) { /* 沒有 JSON 內容 */ }
+    try { data = await res.json(); } catch (e) { /* 可能是空回應，例如 CSV */ }
     if (!res.ok) {
-      const err = new Error((data && (data.message || data.error)) || `伺服器錯誤（${res.status}）`);
-      if (data && data.error) err.code = data.error;   // 例如 need_bank
-      err.payload = data;
-      throw err;
+      const msg = (data && data.error) || `發生錯誤（${res.status}）`;
+      throw new Error(msg);
     }
     return data;
-  },
-  get: (url) => Api.request('GET', url),
-  post: (url, body) => Api.request('POST', url, body),
-  put: (url, body) => Api.request('PUT', url, body),
-  del: (url) => Api.request('DELETE', url),
-};
+  }
+
+  return {
+    get: (url, useAdmin) => request('GET', url, undefined, useAdmin),
+    post: (url, body, useAdmin) => request('POST', url, body ?? {}, useAdmin),
+    put: (url, body, useAdmin) => request('PUT', url, body ?? {}, useAdmin),
+    del: (url, useAdmin) => request('DELETE', url, undefined, useAdmin),
+    adminHeaders,
+  };
+})();
