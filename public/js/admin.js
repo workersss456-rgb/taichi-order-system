@@ -637,7 +637,7 @@ async function loadPricingPanel() {
       Api.get('/api/admin/discount-groups', true),
     ]);
     renderNameList('vendor-list', vendors, 'vendors', '筆訂單');
-    renderNameList('group-list', discountGroups, 'discount-groups', '個規格');
+    renderGroupList();
     await loadDiscountGrid();
   } catch (err) {
     showToast(err.message, 'error');
@@ -689,6 +689,85 @@ function renderNameList(containerId, list, apiPath, usageUnit) {
   }));
 }
 
+// 折扣群組：名稱 + 配合廠商（勾選）+ 主要廠商（估價時預設帶入的那一家）
+function renderGroupList() {
+  const box = document.getElementById('group-list');
+  if (!discountGroups.length) {
+    box.innerHTML = '<p class="small-note">還沒有折扣群組，先在上面新增，例如「PVC 管」「鋼管」。</p>';
+    return;
+  }
+  if (!vendors.length) {
+    box.innerHTML = '<p class="small-note">請先在左邊建立廠商，才能設定每個群組的配合廠商。</p>';
+    return;
+  }
+  box.innerHTML = discountGroups.map((g) => {
+    const linked = g.vendors || [];
+    return `
+    <div class="group-card" data-group="${g.id}">
+      <div class="group-card-head">
+        <strong>${escapeHtml(g.name)}</strong>
+        <span class="usage">${g.usage_count} 個規格</span>
+        <span style="flex:1;"></span>
+        <button class="link-btn" data-rename="${g.id}">改名</button>
+        <button class="link-btn danger" data-remove="${g.id}">刪除</button>
+      </div>
+      <div class="group-vendor-list">
+        ${vendors.map((v) => {
+          const link = linked.find((l) => l.vendor_id === v.id);
+          return `<label class="group-vendor-row">
+            <input type="checkbox" class="gv-check" data-vendor="${v.id}" ${link ? 'checked' : ''}>
+            <span>${escapeHtml(v.name)}</span>
+            <label class="primary-pick"><input type="radio" name="primary-${g.id}" class="gv-primary" data-vendor="${v.id}" ${link && link.is_primary ? 'checked' : ''}> 主要</label>
+          </label>`;
+        }).join('')}
+      </div>
+      <button class="btn btn-secondary btn-sm save-gv-btn" data-group="${g.id}">儲存配合廠商</button>
+    </div>`;
+  }).join('');
+
+  box.querySelectorAll('.save-gv-btn').forEach((btn) => btn.addEventListener('click', async () => {
+    const card = btn.closest('.group-card');
+    const list = [...card.querySelectorAll('.gv-check')].filter((c) => c.checked).map((c) => ({
+      vendor_id: +c.dataset.vendor,
+      is_primary: card.querySelector(`.gv-primary[data-vendor="${c.dataset.vendor}"]`).checked,
+    }));
+    try {
+      await Api.put(`/api/admin/discount-groups/${btn.dataset.group}/vendors`, { vendors: list }, true);
+      showToast('配合廠商已儲存', 'success');
+      loadPricingPanel();
+    } catch (err) { showToast(err.message, 'error'); }
+  }));
+
+  // 勾掉的廠商不能同時是主要廠商
+  box.querySelectorAll('.gv-check').forEach((c) => c.addEventListener('change', () => {
+    if (!c.checked) {
+      const radio = c.closest('.group-card').querySelector(`.gv-primary[data-vendor="${c.dataset.vendor}"]`);
+      if (radio.checked) radio.checked = false;
+    }
+  }));
+  box.querySelectorAll('.gv-primary').forEach((r) => r.addEventListener('change', () => {
+    if (r.checked) r.closest('.group-card').querySelector(`.gv-check[data-vendor="${r.dataset.vendor}"]`).checked = true;
+  }));
+
+  box.querySelectorAll('[data-rename]').forEach((btn) => btn.addEventListener('click', async () => {
+    const cur = discountGroups.find((x) => x.id === +btn.dataset.rename);
+    const name = prompt('新名稱：', cur.name);
+    if (!name || !name.trim() || name.trim() === cur.name) return;
+    try {
+      await Api.put(`/api/admin/discount-groups/${cur.id}`, { name: name.trim() }, true);
+      loadPricingPanel(); loadCatalogManagement();
+    } catch (err) { showToast(err.message, 'error'); }
+  }));
+  box.querySelectorAll('[data-remove]').forEach((btn) => btn.addEventListener('click', async () => {
+    const cur = discountGroups.find((x) => x.id === +btn.dataset.remove);
+    if (!confirm(`刪除折扣群組「${cur.name}」會一併刪除它所有月份的折數與配合廠商設定，${cur.usage_count} 個規格會變成「未指定群組」，確定嗎？`)) return;
+    try {
+      await Api.del(`/api/admin/discount-groups/${cur.id}`, true);
+      loadPricingPanel(); loadCatalogManagement();
+    } catch (err) { showToast(err.message, 'error'); }
+  }));
+}
+
 async function addNameEntry(apiPath, inputId) {
   const input = document.getElementById(inputId);
   const name = input.value.trim();
@@ -712,30 +791,38 @@ async function loadDiscountGrid() {
     status.textContent = '';
     return;
   }
+  const withVendors = discountGroups.filter((g) => (g.vendors || []).length);
+  if (!withVendors.length) {
+    grid.innerHTML = '<p class="small-note">每個折扣群組都還沒設定配合廠商，請先在上方的群組卡片裡勾選。</p>';
+    status.textContent = '';
+    return;
+  }
+
   try {
     const data = await Api.get(`/api/admin/discounts?month=${month}`, true);
     const find = (g, v) => data.entries.find((e) => e.group_id === g && e.vendor_id === v);
-    const ownCount = data.entries.filter((e) => !e.inherited).length;
-    const inheritedCount = data.entries.length - ownCount;
-    status.textContent = ownCount
-      ? `本月已設定 ${ownCount} 格${inheritedCount ? `，另有 ${inheritedCount} 格沿用前月` : ''}`
-      : (inheritedCount ? `⚠️ ${month} 尚未儲存，畫面數字沿用前面月份` : `${month} 尚無任何折數`);
+    let own = 0, inherited = 0, blank = 0;
 
-    grid.innerHTML = `
-      <table class="disc-table">
-        <thead><tr><th>折扣群組 ＼ 廠商</th>${vendors.map((v) => `<th>${escapeHtml(v.name)}</th>`).join('')}</tr></thead>
-        <tbody>
-          ${discountGroups.map((g) => `<tr>
-            <td>${escapeHtml(g.name)}</td>
-            ${vendors.map((v) => {
-              const e = find(g.id, v.id);
-              const title = e && e.inherited ? `沿用 ${e.month}` : '';
-              return `<td><input type="text" inputmode="decimal" class="mini-input disc-cell ${e && e.inherited ? 'inherited' : ''}"
-                data-group="${g.id}" data-vendor="${v.id}" value="${e ? e.discount : ''}" title="${title}" placeholder="—"></td>`;
-            }).join('')}
-          </tr>`).join('')}
-        </tbody>
-      </table>`;
+    grid.innerHTML = `<div class="disc-cards">${withVendors.map((g) => `
+      <div class="disc-card">
+        <div class="disc-card-head">${escapeHtml(g.name)}</div>
+        ${g.vendors.map((v) => {
+          const e = find(g.id, v.vendor_id);
+          if (e && !e.inherited) own++; else if (e) inherited++; else blank++;
+          return `<div class="disc-row">
+            <span class="disc-vendor">${escapeHtml(v.name)}${v.is_primary ? '<span class="primary-tag">主要</span>' : ''}</span>
+            <input type="text" inputmode="decimal" class="mini-input disc-cell ${e && e.inherited ? 'inherited' : ''}"
+              data-group="${g.id}" data-vendor="${v.vendor_id}" value="${e ? e.discount : ''}"
+              title="${e && e.inherited ? `沿用 ${e.month}` : ''}" placeholder="—">
+            <span class="disc-unit">折</span>
+          </div>`;
+        }).join('')}
+      </div>`).join('')}</div>`;
+
+    status.textContent = own
+      ? `本月已設定 ${own} 筆${inherited ? `，${inherited} 筆沿用前月` : ''}${blank ? `，${blank} 筆未填` : ''}`
+      : (inherited ? `⚠️ ${month} 尚未儲存，畫面數字沿用前面月份` : `${month} 尚無任何折數`);
+
     grid.querySelectorAll('.disc-cell').forEach((inp) => inp.addEventListener('input', () => inp.classList.remove('inherited')));
   } catch (err) {
     grid.innerHTML = `<p class="small-note">${escapeHtml(err.message)}</p>`;
@@ -854,6 +941,12 @@ const ORDER_NEXT_STEPS = {
   closed: [],
 };
 
+// 一張單可能跨廠商：整理出這張單用到的所有廠商
+function vendorSummary(o) {
+  const names = [...new Set(o.items.map((it) => it.vendor_name).filter(Boolean))];
+  return names.length ? names.join('、') : (o.vendor || '');
+}
+
 function money(n) {
   if (n === null || n === undefined || n === '') return '';
   return Number(n).toLocaleString('zh-TW', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -867,6 +960,10 @@ function renderPricingBlock(o) {
       <tr>
         <td>${escapeHtml(it.item_name)} ${[it.spec, it.color].filter(Boolean).map(escapeHtml).join(' / ')}<div class="price-hint" data-item="${it.id}"></div></td>
         <td style="text-align:center;">${it.quantity} ${escapeHtml(it.unit || '')}</td>
+        <td><select class="mini-input price-vendor" data-item="${it.id}" style="min-width:110px;">
+          <option value="">—</option>
+          ${vendors.map((v) => `<option value="${v.id}" ${v.id === it.vendor_id ? 'selected' : ''}>${escapeHtml(v.name)}</option>`).join('')}
+        </select></td>
         <td><input type="number" step="0.01" min="0" class="price-list" data-item="${it.id}" value="${it.list_price ?? ''}" placeholder="牌價" style="width:90px; padding:4px 6px; border:1px solid var(--border); border-radius:5px; background:var(--surface-sunken);"></td>
         <td><input type="number" step="0.01" min="0" class="price-disc" data-item="${it.id}" value="${it.discount === null || it.discount === undefined ? '' : Number(it.discount)}" placeholder="75" style="width:70px; padding:4px 6px; border:1px solid var(--border); border-radius:5px; background:var(--surface-sunken);"></td>
         <td class="price-unit" data-item="${it.id}" style="text-align:right;">${money(it.unit_price)}</td>
@@ -887,13 +984,13 @@ function renderPricingBlock(o) {
       </summary>
       <div style="overflow-x:auto; margin-top:8px;">
         <table class="table pricing-table" data-id="${o.id}" style="font-size:12.5px;">
-          <thead><tr><th>品項</th><th style="text-align:center;">數量</th><th>牌價</th><th>折數 %<br><span style="font-weight:400; font-size:11px;">(75 折填 75)</span></th><th style="text-align:right;">單價</th><th style="text-align:right;">小計</th></tr></thead>
+          <thead><tr><th>品項</th><th style="text-align:center;">數量</th><th>廠商</th><th>牌價</th><th>折數 %<br><span style="font-weight:400; font-size:11px;">(75 折填 75)</span></th><th style="text-align:right;">單價</th><th style="text-align:right;">小計</th></tr></thead>
           <tbody>${rows}</tbody>
         </table>
       </div>
-      <button class="btn btn-secondary btn-sm autofill-pricing-btn" data-id="${o.id}" style="margin-top:8px;">📥 依牌價＋廠商折數帶入</button>
+      <button class="btn btn-secondary btn-sm autofill-pricing-btn" data-id="${o.id}" style="margin-top:8px;">📥 自動帶入廠商＋牌價＋折數</button>
       <button class="btn btn-primary btn-sm save-pricing-btn" data-id="${o.id}" style="margin-top:8px;">儲存報價</button>
-      <p class="small-note">先在上方選好廠商，按「帶入」會依品項牌價與該廠商在下單月份的折數自動填入；確認或修改後按「儲存報價」才會存檔。單價 = 牌價 × 折數 ÷ 100（75 折填 75，可超過 100）。</p>
+      <p class="small-note">按「自動帶入」會依每個品項的折扣群組找出配合廠商（多家時取主要廠商），再帶入牌價與該廠商當月折數；廠商可逐項改。確認後按「儲存報價」才會存檔。單價 = 牌價 × 折數 ÷ 100（75 折填 75，可超過 100）。</p>
     </details>
   `;
 }
@@ -965,12 +1062,7 @@ async function loadHistoryPanel() {
         ` : ''}
 
         <div class="ticket-row" style="margin-top:10px; gap:8px; align-items:center; flex-wrap:wrap;">
-          <select class="vendor-input mini-input" data-id="${o.id}" data-saved="${o.vendor_id || ''}" style="flex:1; min-width:160px;">
-            <option value="">— 選擇廠商 —</option>
-            ${!o.vendor_id && o.vendor ? `<option value="" selected>${escapeHtml(o.vendor)}（舊資料，請重新選擇）</option>` : ''}
-            ${vendors.map((v) => `<option value="${v.id}" ${v.id === o.vendor_id ? 'selected' : ''}>${escapeHtml(v.name)}</option>`).join('')}
-          </select>
-          <button class="btn btn-secondary btn-sm save-vendor-btn" data-id="${o.id}">儲存廠商</button>
+          <span class="small-note" style="margin:0;">廠商：${escapeHtml(vendorSummary(o)) || '（尚未指定，請在下方報價區逐項選擇）'}</span>
         </div>
 
         ${renderPricingBlock(o)}
@@ -991,16 +1083,6 @@ async function loadHistoryPanel() {
 }
 
 function bindHistoryActions(list) {
-  list.querySelectorAll('.save-vendor-btn').forEach((btn) => btn.addEventListener('click', async () => {
-    const input = list.querySelector(`.vendor-input[data-id="${btn.dataset.id}"]`);
-    try {
-      if (!input.value) return showToast('請先從清單選擇廠商', 'error');
-      await Api.put(`/api/admin/orders/${btn.dataset.id}/vendor`, { vendor_id: +input.value }, true);
-      input.dataset.saved = input.value;
-      showToast('廠商已更新', 'success');
-    } catch (err) { showToast(err.message, 'error'); }
-  }));
-
   list.querySelectorAll('.save-reply-btn').forEach((btn) => btn.addEventListener('click', async () => {
     const ta = list.querySelector(`.reply-input[data-id="${btn.dataset.id}"]`);
     try {
@@ -1048,28 +1130,24 @@ function bindHistoryActions(list) {
 
   list.querySelectorAll('.autofill-pricing-btn').forEach((btn) => btn.addEventListener('click', async () => {
     const id = btn.dataset.id;
-    const select = list.querySelector(`.vendor-input[data-id="${id}"]`);
-    if (!select.value) return showToast('請先在上方選擇廠商', 'error');
     const table = list.querySelector(`.pricing-table[data-id="${id}"]`);
     const hasExisting = [...table.querySelectorAll('.price-list, .price-disc')].some((inp) => inp.value !== '');
-    if (hasExisting && !confirm('帶入會覆蓋目前表格裡已填的牌價與折數（尚未儲存前都可以再改），確定嗎？')) return;
+    if (hasExisting && !confirm('帶入會覆蓋目前表格裡已填的廠商、牌價與折數（尚未儲存前都可以再改），確定嗎？')) return;
     try {
-      // 選了但還沒存的廠商，順便存起來，避免報價跟廠商對不上
-      if (select.dataset.saved !== select.value) {
-        await Api.put(`/api/admin/orders/${id}/vendor`, { vendor_id: +select.value }, true);
-        select.dataset.saved = select.value;
-      }
-      const result = await Api.get(`/api/admin/orders/${id}/price-suggest?vendor_id=${select.value}`, true);
+      const result = await Api.get(`/api/admin/orders/${id}/price-suggest`, true);
       let problems = 0;
       result.items.forEach((s) => {
         const listInp = table.querySelector(`.price-list[data-item="${s.id}"]`);
-        const discInp = table.querySelector(`.price-disc[data-item="${s.id}"]`);
-        const hint = table.querySelector(`.price-hint[data-item="${s.id}"]`);
         if (!listInp) return;
+        const discInp = table.querySelector(`.price-disc[data-item="${s.id}"]`);
+        const vendorSel = table.querySelector(`.price-vendor[data-item="${s.id}"]`);
+        const hint = table.querySelector(`.price-hint[data-item="${s.id}"]`);
         listInp.value = s.list_price ?? '';
         discInp.value = s.discount ?? '';
+        if (s.vendor_id) vendorSel.value = s.vendor_id;
         const notes = [];
         if (s.group_name) notes.push(s.group_name);
+        if (s.vendor_name && s.vendor_source === 'group') notes.push(`主要廠商：${s.vendor_name}`);
         if (s.discount_month && s.discount_month !== result.order_month) notes.push(`沿用 ${s.discount_month} 折數`);
         if (s.problem) { notes.push(`⚠️ ${s.problem}`); problems++; }
         hint.textContent = notes.join('・');
@@ -1086,10 +1164,12 @@ function bindHistoryActions(list) {
       id: +tr.querySelector('.price-list').dataset.item,
       list_price: tr.querySelector('.price-list').value,
       discount: tr.querySelector('.price-disc').value,
+      vendor_id: tr.querySelector('.price-vendor').value || null,
     }));
     try {
       await Api.put(`/api/admin/orders/${btn.dataset.id}/pricing`, { items }, true);
       showToast('報價已儲存', 'success');
+      loadHistoryPanel();
     } catch (err) { showToast(err.message, 'error'); }
   }));
 }

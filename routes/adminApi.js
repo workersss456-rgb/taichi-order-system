@@ -365,15 +365,25 @@ router.put('/orders/:id/pricing', async (req, res) => {
         ? null : Number(it.discount);
       // 單價由後端算，避免前端算的跟存的不一致；折數是百分比（75 折 = 75，可以超過 100）
       const unit = (list !== null && disc !== null) ? Math.round(list * disc) / 100 : null;
+      const vendorId = it.vendor_id ? Number(it.vendor_id) : null;
       await client.query(
-        'UPDATE order_items SET list_price = $1, discount = $2, unit_price = $3 WHERE id = $4 AND order_id = $5',
-        [list, disc, unit, it.id, req.params.id]
+        'UPDATE order_items SET list_price = $1, discount = $2, unit_price = $3, vendor_id = $4 WHERE id = $5 AND order_id = $6',
+        [list, disc, unit, vendorId, it.id, req.params.id]
       );
     }
+    // 整張單的「廠商」欄位＝品項上出現過的所有廠商（列印表頭與 CSV 用）
+    await client.query(
+      `UPDATE orders o SET vendor = COALESCE((
+         SELECT STRING_AGG(DISTINCT v.name, '、') FROM order_items oi
+         JOIN vendors v ON v.id = oi.vendor_id WHERE oi.order_id = o.id
+       ), o.vendor) WHERE o.id = $1`, [req.params.id]
+    );
     await client.query('COMMIT');
 
     const rows = (await pool.query(
-      'SELECT * FROM order_items WHERE order_id = $1 ORDER BY id', [req.params.id]
+      `SELECT oi.*, v.name AS vendor_name FROM order_items oi
+       LEFT JOIN vendors v ON v.id = oi.vendor_id
+       WHERE oi.order_id = $1 ORDER BY oi.id`, [req.params.id]
     )).rows;
     res.json({ ok: true, items: rows });
   } catch (err) {
@@ -460,6 +470,14 @@ function registerNameList(pathName, table, label) {
         ? '(SELECT COUNT(*)::int FROM item_prices p WHERE p.group_id = t.id) AS usage_count'
         : '(SELECT COUNT(*)::int FROM orders o WHERE o.vendor_id = t.id) AS usage_count';
       const rows = (await pool.query(`SELECT t.*, ${usageSql} FROM ${table} t ORDER BY t.sort_order, t.id`)).rows;
+      if (table === 'discount_groups') {
+        const links = (await pool.query(
+          `SELECT gv.group_id, gv.vendor_id, gv.is_primary, v.name
+           FROM group_vendors gv JOIN vendors v ON v.id = gv.vendor_id
+           ORDER BY v.sort_order, v.id`
+        )).rows;
+        rows.forEach((g) => { g.vendors = links.filter((l) => l.group_id === g.id); });
+      }
       res.json(rows);
     } catch (err) {
       console.error(err);
@@ -512,6 +530,34 @@ function registerNameList(pathName, table, label) {
 }
 registerNameList('vendors', 'vendors', '廠商');
 registerNameList('discount-groups', 'discount_groups', '折扣群組');
+
+// 設定某個折扣群組的配合廠商：vendors = [{ vendor_id, is_primary }]
+router.put('/discount-groups/:id/vendors', async (req, res) => {
+  const groupId = Number(req.params.id);
+  const list = Array.isArray(req.body.vendors) ? req.body.vendors : [];
+  if (list.filter((v) => v.is_primary).length > 1) {
+    return res.status(400).json({ error: '主要廠商只能指定一家' });
+  }
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query('DELETE FROM group_vendors WHERE group_id = $1', [groupId]);
+    for (const v of list) {
+      await client.query(
+        'INSERT INTO group_vendors (group_id, vendor_id, is_primary) VALUES ($1,$2,$3)',
+        [groupId, Number(v.vendor_id), !!v.is_primary]
+      );
+    }
+    await client.query('COMMIT');
+    res.json({ ok: true });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error(err);
+    res.status(500).json({ error: '儲存配合廠商失敗' });
+  } finally {
+    client.release();
+  }
+});
 
 // ============================================================
 // 每月折數（折扣群組 × 廠商 × 月份）
@@ -583,39 +629,72 @@ router.put('/discounts', async (req, res) => {
 // ============================================================
 router.get('/orders/:id/price-suggest', async (req, res) => {
   try {
-    const vendorId = Number(req.query.vendor_id);
-    if (!vendorId) return res.status(400).json({ error: '請先選擇廠商' });
     const order = (await pool.query(
       `SELECT id, TO_CHAR(created_at AT TIME ZONE 'Asia/Taipei', 'YYYY-MM') AS order_month FROM orders WHERE id = $1`,
       [req.params.id]
     )).rows[0];
     if (!order) return res.status(404).json({ error: '找不到這筆叫料單' });
 
-    const orderItems = (await pool.query('SELECT id, item_id, spec FROM order_items WHERE order_id = $1 ORDER BY id', [order.id])).rows;
+    const orderItems = (await pool.query(
+      'SELECT id, item_id, spec, vendor_id FROM order_items WHERE order_id = $1 ORDER BY id', [order.id]
+    )).rows;
+
     const suggestions = [];
     for (const oi of orderItems) {
-      const s = { id: oi.id, list_price: null, discount: null, discount_month: null, group_name: null, problem: null };
-      if (!oi.item_id) { s.problem = '品項已不在目錄'; suggestions.push(s); continue; }
+      const sug = {
+        id: oi.id, vendor_id: null, vendor_name: null, vendor_source: null,
+        list_price: null, discount: null, discount_month: null, group_name: null, problem: null,
+      };
+      if (!oi.item_id) { sug.problem = '品項已不在目錄'; suggestions.push(sug); continue; }
+
       const price = (await pool.query(
         `SELECT p.list_price, p.group_id, g.name AS group_name FROM item_prices p
          LEFT JOIN discount_groups g ON g.id = p.group_id
          WHERE p.item_id = $1 AND p.spec = $2`, [oi.item_id, oi.spec || '']
       )).rows[0];
-      if (!price || price.list_price === null) { s.problem = '尚未設定牌價'; }
-      else { s.list_price = Number(price.list_price); }
-      if (price && price.group_id) {
-        s.group_name = price.group_name;
-        const disc = (await pool.query(
-          `SELECT month, discount FROM monthly_discounts
-           WHERE group_id = $1 AND vendor_id = $2 AND month <= $3 ORDER BY month DESC LIMIT 1`,
-          [price.group_id, vendorId, order.order_month]
-        )).rows[0];
-        if (disc) { s.discount = Number(disc.discount); s.discount_month = disc.month; }
-        else { s.problem = s.problem || `此廠商在「${price.group_name}」尚無折數`; }
-      } else if (price) {
-        s.problem = s.problem || '尚未指定折扣群組';
+      if (!price || price.list_price === null) sug.problem = '尚未設定牌價';
+      else sug.list_price = Number(price.list_price);
+      if (!price || !price.group_id) {
+        sug.problem = sug.problem || '尚未指定折扣群組';
+        suggestions.push(sug); continue;
       }
-      suggestions.push(s);
+      sug.group_name = price.group_name;
+
+      // 廠商：品項上已指定就沿用；否則用這個群組的主要廠商，
+      // 沒設主要廠商但只配合一家時就用那一家
+      const groupVendors = (await pool.query(
+        `SELECT gv.vendor_id, gv.is_primary, v.name FROM group_vendors gv JOIN vendors v ON v.id = gv.vendor_id
+         WHERE gv.group_id = $1 ORDER BY v.sort_order, v.id`, [price.group_id]
+      )).rows;
+      let vendor = null;
+      if (oi.vendor_id) {
+        vendor = groupVendors.find((v) => v.vendor_id === oi.vendor_id)
+          || (await pool.query('SELECT id AS vendor_id, name FROM vendors WHERE id = $1', [oi.vendor_id])).rows[0]
+          || null;
+        if (vendor) sug.vendor_source = 'item';
+      }
+      if (!vendor) {
+        vendor = groupVendors.find((v) => v.is_primary) || (groupVendors.length === 1 ? groupVendors[0] : null);
+        if (vendor) sug.vendor_source = 'group';
+      }
+      if (!vendor) {
+        sug.problem = sug.problem || (groupVendors.length
+          ? `「${price.group_name}」配合多家廠商，請先選廠商`
+          : `「${price.group_name}」尚未設定配合廠商`);
+        suggestions.push(sug); continue;
+      }
+      sug.vendor_id = vendor.vendor_id;
+      sug.vendor_name = vendor.name;
+
+      const disc = (await pool.query(
+        `SELECT month, discount FROM monthly_discounts
+         WHERE group_id = $1 AND vendor_id = $2 AND month <= $3 ORDER BY month DESC LIMIT 1`,
+        [price.group_id, sug.vendor_id, order.order_month]
+      )).rows[0];
+      if (disc) { sug.discount = Number(disc.discount); sug.discount_month = disc.month; }
+      else sug.problem = sug.problem || `${vendor.name} 在「${price.group_name}」尚無折數`;
+
+      suggestions.push(sug);
     }
     res.json({ order_month: order.order_month, items: suggestions });
   } catch (err) {
@@ -748,7 +827,10 @@ router.get('/orders', async (req, res) => {
     const orders = (await pool.query(sql, params)).rows.map(formatOrderRow);
     const ids = orders.map((o) => o.id);
     const allItems = ids.length
-      ? (await pool.query('SELECT * FROM order_items WHERE order_id = ANY($1::int[]) ORDER BY id', [ids])).rows
+      ? (await pool.query(
+          `SELECT oi.*, v.name AS vendor_name FROM order_items oi
+           LEFT JOIN vendors v ON v.id = oi.vendor_id
+           WHERE oi.order_id = ANY($1::int[]) ORDER BY oi.id`, [ids])).rows
       : [];
     res.json(orders.map((o) => ({ ...o, items: allItems.filter((it) => it.order_id === o.id) })));
   } catch (err) {
@@ -765,7 +847,10 @@ router.get('/orders/:id', async (req, res) => {
        FROM orders WHERE id = $1`, [req.params.id]
     )).rows[0];
     if (!order) return res.status(404).json({ error: '找不到這筆叫料單' });
-    const items = (await pool.query('SELECT * FROM order_items WHERE order_id = $1 ORDER BY id', [order.id])).rows;
+    const items = (await pool.query(
+      `SELECT oi.*, v.name AS vendor_name FROM order_items oi
+       LEFT JOIN vendors v ON v.id = oi.vendor_id
+       WHERE oi.order_id = $1 ORDER BY oi.id`, [order.id])).rows;
     res.json({ ...formatOrderRow(order), items });
   } catch (err) {
     console.error(err);

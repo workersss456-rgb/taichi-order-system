@@ -77,6 +77,9 @@
   /* 備註＋簽核：獨立於品項表格之外的區塊，這樣只會在整份文件結束的地方出現一次，
      不會像 tfoot 一樣被瀏覽器在每一頁都重複印出來 */
   table.footer-table { margin-top: -1px; break-inside: avoid; }
+  /* 跨廠商時，一張叫料單會拆成多張訂購單 */
+  .doc-sheet + .doc-sheet { margin-top: 28px; padding-top: 28px; border-top: 2px dashed var(--brand-gray); }
+  @media print { .doc-sheet + .doc-sheet { margin-top: 0; padding-top: 0; border-top: none; } }
   .remark-cell { text-align: left; vertical-align: top; min-height: 2cm; padding: 8px !important; }
   .sign-row { display: flex; }
   .sign-box { flex: 1; border-right: 1px solid var(--brand-navy); text-align: center; }
@@ -98,6 +101,7 @@
 <div class="print-toolbar no-print">
   <button class="btn btn-primary" id="print-btn">🖨️ 列印</button>
   <button class="btn btn-secondary" id="close-btn">關閉</button>
+  <span class="small-note" id="sheet-count" style="margin:0;"></span>
 </div>
 
 <div class="print-page-wrap">

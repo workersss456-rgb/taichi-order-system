@@ -181,7 +181,17 @@ async function createTables() {
       UNIQUE (group_id, vendor_id, month)
     );
 
+    -- 供應關係：哪些廠商供應這個折扣群組的材料（is_primary = 估價時預設帶入的那一家）
+    CREATE TABLE IF NOT EXISTS group_vendors (
+      group_id INTEGER NOT NULL REFERENCES discount_groups(id) ON DELETE CASCADE,
+      vendor_id INTEGER NOT NULL REFERENCES vendors(id) ON DELETE CASCADE,
+      is_primary BOOLEAN DEFAULT false,
+      PRIMARY KEY (group_id, vendor_id)
+    );
+
     ALTER TABLE orders ADD COLUMN IF NOT EXISTS vendor_id INTEGER REFERENCES vendors(id) ON DELETE SET NULL;
+    -- 同一張叫料單可能跨廠商（例如 PVC 與鋼管不同供應商），廠商記在品項上
+    ALTER TABLE order_items ADD COLUMN IF NOT EXISTS vendor_id INTEGER REFERENCES vendors(id) ON DELETE SET NULL;
   `);
 
   await runOnceMigrations();

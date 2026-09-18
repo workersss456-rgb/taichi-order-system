@@ -28,13 +28,40 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
     document.title = showPrice ? '列印訂購單（內部核簽）' : '列印訂購單（廠商）';
     if (showPrice) root.classList.add('with-price');
-    root.innerHTML = renderPrintHtml(order, showPrice);
+
+    if (showPrice) {
+      // 內部核簽單：整張單一份，品項上多一欄廠商
+      root.innerHTML = renderPrintHtml(order, order.items, true, null);
+    } else {
+      // 廠商訂購單：同一張叫料單可能跨廠商，依廠商拆成多張，各印各的
+      const groups = splitByVendor(order.items);
+      root.innerHTML = groups.map((g, i) => `
+        <section class="doc-sheet"${i < groups.length - 1 ? ' style="break-after:page; page-break-after:always;"' : ''}>
+          ${renderPrintHtml(order, g.items, false, groups.length > 1 ? g.name : (g.name || order.vendor || ''))}
+        </section>`).join('');
+      if (groups.length > 1) {
+        document.getElementById('sheet-count').textContent = `這張叫料單跨 ${groups.length} 家廠商，已自動分成 ${groups.length} 張訂購單（列印時各自一頁）`;
+      }
+    }
   } catch (err) {
     root.innerHTML = `<p style="text-align:center; padding:40px;">載入失敗：${escapeHtml(err.message)}</p>`;
   }
 });
 
-function renderPrintHtml(order, showPrice) {
+// 依品項上的廠商分組；沒指定廠商的歸在「未指定廠商」，排在最後
+function splitByVendor(items) {
+  const map = new Map();
+  items.forEach((it) => {
+    const key = it.vendor_name || '';
+    if (!map.has(key)) map.set(key, []);
+    map.get(key).push(it);
+  });
+  const groups = [...map.entries()].map(([name, list]) => ({ name, items: list }));
+  groups.sort((a, b) => (a.name ? 0 : 1) - (b.name ? 0 : 1));
+  return groups;
+}
+
+function renderPrintHtml(order, items, showPrice, vendorLabel) {
   const docTitle = '太綺水電工程有限公司45149105';
   const orderNo = `#${String(order.id).padStart(5, '0')}`;
   const deliveryOrder = order.delivery_type === '訂貨' ? '☑' : '□';
@@ -44,7 +71,7 @@ function renderPrintHtml(order, showPrice) {
     ? '' : Number(n).toLocaleString('zh-TW', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
   let total = 0;
-  const itemRows = order.items.map((it, i) => {
+  const itemRows = items.map((it, i) => {
     const unit = (it.unit_price === null || it.unit_price === undefined || it.unit_price === '')
       ? null : Number(it.unit_price);
     const sub = unit === null ? null : unit * it.quantity;
@@ -56,7 +83,8 @@ function renderPrintHtml(order, showPrice) {
       <td>${escapeHtml([it.spec, it.color].filter(Boolean).join(' / '))}</td>
       <td class="cell-qty">${it.quantity}</td>
       <td class="cell-unit">${escapeHtml(it.unit || '')}</td>
-      ${showPrice ? `<td class="cell-money">${money(it.list_price)}</td>
+      ${showPrice ? `<td>${escapeHtml(it.vendor_name || '')}</td>
+      <td class="cell-money">${money(it.list_price)}</td>
       <td class="cell-qty">${it.discount === null || it.discount === undefined || it.discount === '' ? '' : Number(it.discount)}</td>
       <td class="cell-money">${money(unit)}</td>
       <td class="cell-money">${money(sub)}</td>` : ''}
@@ -65,9 +93,9 @@ function renderPrintHtml(order, showPrice) {
   `;
   }).join('');
 
-  const colCount = showPrice ? 10 : 6;
+  const colCount = showPrice ? 11 : 6;
   const priceHead = showPrice
-    ? '<th class="col-money">牌價</th><th class="col-qty">折數</th><th class="col-money">單價</th><th class="col-money">小計</th>'
+    ? '<th>廠商</th><th class="col-money">牌價</th><th class="col-qty">折數</th><th class="col-money">單價</th><th class="col-money">小計</th>'
     : '';
   const totalRow = showPrice
     ? `<tr><td colspan="${colCount - 2}" style="text-align:right; font-weight:700;">合計</td><td class="cell-money" style="font-weight:700;">${money(total)}</td><td></td></tr>`
@@ -93,7 +121,7 @@ function renderPrintHtml(order, showPrice) {
         <th>送貨地址</th><td colspan="5">${escapeHtml(order.site_address || '')}</td>
       </tr>
       <tr>
-        <th>廠商</th><td colspan="3">${escapeHtml(order.vendor || '')}</td>
+        <th>廠商</th><td colspan="3">${escapeHtml(vendorLabel === null ? (order.vendor || '') : (vendorLabel || '未指定廠商'))}</td>
         <th>類別</th><td>${deliveryOrder}訂貨　${deliverySelf}自取</td>
       </tr>
     </table>

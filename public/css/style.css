@@ -600,3 +600,24 @@ a { color: var(--primary); }
 .price-missing { color: var(--danger); font-size: 12px; }
 .price-hint { font-size: 11.5px; color: var(--text-faint); margin-top: 2px; }
 .price-hint.warn { color: var(--danger); }
+
+/* ---------- 供應關係（折扣群組 × 廠商） ---------- */
+.group-card { border: 1px solid var(--border); border-radius: var(--radius); padding: 10px 12px; margin-bottom: 10px; background: var(--surface-sunken); }
+.group-card-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; font-size: 13.5px; }
+.group-card-head .usage { color: var(--text-faint); font-size: 11.5px; }
+.link-btn { border: none; background: none; color: var(--text-secondary); font-size: 12px; cursor: pointer; padding: 2px 4px; }
+.link-btn.danger { color: var(--danger); }
+.group-vendor-list { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 12px; margin-bottom: 8px; }
+@media (max-width: 600px) { .group-vendor-list { grid-template-columns: 1fr; } }
+.group-vendor-row { display: flex; align-items: center; gap: 6px; font-size: 13px; cursor: pointer; }
+.group-vendor-row input { width: auto; margin: 0; }
+.group-vendor-row .primary-pick { margin-left: auto; font-size: 11.5px; color: var(--text-faint); display: flex; align-items: center; gap: 3px; cursor: pointer; }
+.disc-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; }
+.disc-card { border: 1px solid var(--border); border-radius: var(--radius); padding: 10px 12px; }
+.disc-card-head { font-weight: 600; font-size: 13.5px; margin-bottom: 8px; padding-bottom: 6px; border-bottom: 1px solid var(--border); }
+.disc-row { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+.disc-vendor { flex: 1; font-size: 13px; }
+.primary-tag { margin-left: 5px; font-size: 10.5px; color: var(--accent, var(--text-faint)); border: 1px solid var(--border); border-radius: 4px; padding: 0 4px; }
+.disc-row input { width: 72px; text-align: center; }
+.disc-row input.inherited { color: var(--text-faint); font-style: italic; }
+.disc-unit { font-size: 12px; color: var(--text-faint); }

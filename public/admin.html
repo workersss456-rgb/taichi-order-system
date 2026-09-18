@@ -109,7 +109,7 @@
     <!-- ---- 廠商 / 每月折數 ---- -->
     <section class="admin-panel" id="panel-pricing">
       <div class="section-title"><div><span class="eyebrow">Pricing</span><h2>廠商 / 折扣群組 / 每月折數</h2></div></div>
-      <p class="small-note" style="margin-bottom:14px;">牌價固定設定在品項規格上；折數依「折扣群組 × 廠商」每月輸入一次。當月沒填的格子會沿用最近一個月的數字。</p>
+      <p class="small-note" style="margin-bottom:14px;">牌價固定設定在品項規格上。每個折扣群組先勾選配合廠商（例如 PVC 管和鋼管各自找不同家），下方每月只需要填這些廠商的折數；當月沒填會沿用最近一個月的數字。</p>
 
       <div class="pricing-lists">
         <div class="card">
@@ -123,7 +123,7 @@
         <div class="card">
           <h3 style="font-size:14px; margin-bottom:12px;">折扣群組</h3>
           <div style="display:flex; gap:8px; margin-bottom:12px;">
-            <input type="text" id="new-group-name" class="mini-input" placeholder="例如：電線-細線、PVC 管" style="flex:1;">
+            <input type="text" id="new-group-name" class="mini-input" placeholder="例如：PVC 管、鋼管、電線-細線" style="flex:1;">
             <button class="btn btn-secondary btn-sm" id="add-group-btn">新增</button>
           </div>
           <div id="group-list" class="tag-input-list"></div>
@@ -137,7 +137,7 @@
           <span class="small-note" id="disc-status" style="margin:0;"></span>
         </div>
         <div style="overflow-x:auto;" id="disc-grid"></div>
-        <p class="small-note">折數以百分比填寫：75 折填 75，可以超過 100（例如 105）。灰色斜體是沿用前面月份的數字，按「儲存本月折數」會把畫面上所有數字存成這個月的設定；清空格子再儲存，代表本月不設定。</p>
+        <p class="small-note">折數以百分比填寫：75 折填 75，可以超過 100（例如 105）。灰色斜體是沿用前面月份的數字，按「儲存本月折數」會把畫面上所有數字存成這個月的設定；清空格子再儲存，代表本月不設定。只會列出各群組有勾選的配合廠商。</p>
       </div>
     </section>
 

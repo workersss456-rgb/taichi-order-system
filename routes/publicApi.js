@@ -211,7 +211,10 @@ router.get('/orders/:id', async (req, res) => {
     delete order.created_at_fmt;
     order.need_date = order.need_date_fmt;
     delete order.need_date_fmt;
-    const items = (await pool.query('SELECT * FROM order_items WHERE order_id = $1 ORDER BY id', [order.id])).rows;
+    const items = (await pool.query(
+      `SELECT oi.*, v.name AS vendor_name FROM order_items oi
+       LEFT JOIN vendors v ON v.id = oi.vendor_id
+       WHERE oi.order_id = $1 ORDER BY oi.id`, [order.id])).rows;
     res.json({ ...publicOrder(order), items: items.map(publicItem) });
   } catch (err) {
     console.error(err);
